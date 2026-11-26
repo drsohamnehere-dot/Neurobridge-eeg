@@ -38,7 +38,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="NeuroBridge EEG Workbench API", version="3.0.1")
+app = FastAPI(title="NeuroBridge EEG Workbench API", version="3.0.2")
 
 # Optional CORS for a Netlify-hosted frontend calling this backend directly.
 # Large EEG file uploads go browser -> backend directly; they do not pass through
@@ -510,14 +510,47 @@ def analyse_edf(path: Path) -> dict[str, Any]:
         raise ValueError(f"EDF/BDF reader failed: {e}")
 
 
-def analyse_pdf(path: Path) -> tuple[dict[str, Any], str]:
+def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
+    from server.report_wording import review_report_wording
     doc = pdf_document(path)
-    texts = [p.get_text("text") for p in doc]
+    from server.pdf_ocr import extract_scanned_page_text
+    texts = []
+    ocr_attempted = 0
+    ocr_success = 0
+    ocr_unavailable = False
+    for index, page in enumerate(doc):
+        page_text = page.get_text("text") or ""
+        if len(page_text.strip()) < 25 and run_ocr and index < 20:
+            scanned_text, ocr_result = extract_scanned_page_text(page, index, enabled=True)
+            if ocr_result == "tesseract_unavailable":
+                ocr_unavailable = True
+            elif ocr_result != "page_limit":
+                ocr_attempted += 1
+            if scanned_text:
+                page_text = (page_text + "\n" + scanned_text).strip()
+                ocr_success += 1
+        texts.append(page_text)
     text = "\n\n".join(f"[PAGE {i+1}]\n{t}" for i, t in enumerate(texts) if t.strip())
+    if not run_ocr:
+        ocr_status = "disabled"
+    elif ocr_unavailable:
+        ocr_status = "unavailable"
+    elif ocr_success and ocr_success == ocr_attempted:
+        ocr_status = "completed"
+    elif ocr_success:
+        ocr_status = "partially_completed"
+    elif ocr_attempted:
+        ocr_status = "attempted_no_text"
+    else:
+        ocr_status = "not_needed"
     result = {"kind": "pdf_document", "page_count": len(doc),
-              "pages_with_embedded_text": sum(bool(t.strip()) for t in texts),
-              "text_extraction": "embedded PDF text" if text.strip() else "no embedded text detected; likely scanned/image PDF",
+              "pages_with_extracted_text": sum(bool(t.strip()) for t in texts),
+              "text_extraction": "embedded PDF text and optional OCR" if text.strip() else "no readable text extracted",
               "extracted_characters": len(text),
+              "ocr_status": ocr_status,
+              "ocr_pages_attempted": ocr_attempted,
+              "ocr_pages_with_text": ocr_success,
+              "report_wording_review": review_report_wording(text),
               "limitations": ["Scanned page images are not interpreted as raw EEG waveforms.",
                               "A PDF report is not a substitute for the original digital EEG recording."]}
     doc.close()
@@ -525,7 +558,7 @@ def analyse_pdf(path: Path) -> tuple[dict[str, Any], str]:
 
 
 @app.post("/api/files/{file_id}/analyse")
-def analyse_file(file_id: str, _: None = Depends(require_auth)):
+def analyse_file(file_id: str, ocr: bool = True, _: None = Depends(require_auth)):
     rec = get_file_record(file_id)
     ext, path = rec["extension"], rec["path"]
     try:
@@ -535,7 +568,7 @@ def analyse_file(file_id: str, _: None = Depends(require_auth)):
         elif ext in {".edf", ".bdf"}:
             summary = analyse_edf(path)
         elif ext == ".pdf":
-            summary, extracted_text = analyse_pdf(path)
+            summary, extracted_text = analyse_pdf(path, run_ocr=ocr)
         elif ext in {".png", ".jpg", ".jpeg", ".webp"}:
             from PIL import Image
             im = Image.open(path)
@@ -798,10 +831,24 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
             summ = json.loads(a["summary_json"])
             story.append(Paragraph(a["original_name"], styles["Heading3"]))
             lines = []
-            for k in ["kind", "rows", "sample_count", "duration_seconds", "sampling_rate_estimate_hz", "channel_count", "page_count", "pages_with_embedded_text"]:
+            for k in ["kind", "rows", "sample_count", "duration_seconds", "sampling_rate_estimate_hz", "channel_count", "page_count", "pages_with_embedded_text", "pages_with_extracted_text", "ocr_status", "ocr_pages_attempted", "ocr_pages_with_text"]:
                 if k in summ:
                     lines.append(f"<b>{k.replace('_',' ').title()}:</b> {summ[k]}")
             story.append(Paragraph("<br/>".join(lines) or "No summary fields available.", styles["BodyText"]))
+            wording_review = summ.get("report_wording_review")
+            if wording_review:
+                from xml.sax.saxutils import escape as xml_escape
+                story.append(Paragraph("Automated report-wording review", styles["Heading4"]))
+                for finding in wording_review.get("items", []):
+                    status_label = str(finding.get("status", "context_uncertain")).replace("_", " ")
+                    story.append(Paragraph(
+                        f"<b>{xml_escape(str(finding.get('finding', 'finding')))} — {xml_escape(status_label)}</b>",
+                        styles["BodyText"]
+                    ))
+                    for evidence in finding.get("evidence", [])[:3]:
+                        evidence_text = f"Page {evidence.get('page', '?')}: {evidence.get('wording', '')}"
+                        story.append(Paragraph(xml_escape(evidence_text), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(str(wording_review.get("note", ""))), styles["Italic"]))
             story.append(Spacer(1, 6))
         if s.get("source_text"):
             story += [Paragraph("Source report text supplied", styles["Heading2"]), Paragraph(str(s["source_text"])[:6000].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"), styles["BodyText"])]
