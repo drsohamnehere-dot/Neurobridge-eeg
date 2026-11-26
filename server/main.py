@@ -531,11 +531,23 @@ def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
                 ocr_success += 1
         texts.append(page_text)
     text = "\n\n".join(f"[PAGE {i+1}]\n{t}" for i, t in enumerate(texts) if t.strip())
+    if not run_ocr:
+        ocr_status = "disabled"
+    elif ocr_unavailable:
+        ocr_status = "unavailable"
+    elif ocr_success and ocr_success == ocr_attempted:
+        ocr_status = "completed"
+    elif ocr_success:
+        ocr_status = "partially_completed"
+    elif ocr_attempted:
+        ocr_status = "attempted_no_text"
+    else:
+        ocr_status = "not_needed"
     result = {"kind": "pdf_document", "page_count": len(doc),
               "pages_with_extracted_text": sum(bool(t.strip()) for t in texts),
               "text_extraction": "embedded PDF text and optional OCR" if text.strip() else "no readable text extracted",
               "extracted_characters": len(text),
-              "ocr_status": "disabled" if not run_ocr else ("unavailable" if ocr_unavailable else ("completed" if ocr_success == ocr_attempted and ocr_success else ("partially_completed" if ocr_success else ("attempted_no_text" if ocr_attempted else "not_needed"))),
+              "ocr_status": ocr_status,
               "ocr_pages_attempted": ocr_attempted,
               "ocr_pages_with_text": ocr_success,
               "report_wording_review": review_report_wording(text),
