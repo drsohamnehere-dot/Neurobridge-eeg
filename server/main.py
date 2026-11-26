@@ -820,6 +820,20 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                 if k in summ:
                     lines.append(f"<b>{k.replace('_',' ').title()}:</b> {summ[k]}")
             story.append(Paragraph("<br/>".join(lines) or "No summary fields available.", styles["BodyText"]))
+            wording_review = summ.get("report_wording_review")
+            if wording_review:
+                from xml.sax.saxutils import escape as xml_escape
+                story.append(Paragraph("Automated report-wording review", styles["Heading4"]))
+                for finding in wording_review.get("items", []):
+                    status_label = str(finding.get("status", "context_uncertain")).replace("_", " ")
+                    story.append(Paragraph(
+                        f"<b>{xml_escape(str(finding.get('finding', 'finding')))} — {xml_escape(status_label)}</b>",
+                        styles["BodyText"]
+                    ))
+                    for evidence in finding.get("evidence", [])[:3]:
+                        evidence_text = f"Page {evidence.get('page', '?')}: {evidence.get('wording', '')}"
+                        story.append(Paragraph(xml_escape(evidence_text), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(str(wording_review.get("note", ""))), styles["Italic"]))
             story.append(Spacer(1, 6))
         if s.get("source_text"):
             story += [Paragraph("Source report text supplied", styles["Heading2"]), Paragraph(str(s["source_text"])[:6000].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"), styles["BodyText"])]
