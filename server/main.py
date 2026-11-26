@@ -892,6 +892,50 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                 if k in summ:
                     lines.append(f"<b>{k.replace('_',' ').title()}:</b> {summ[k]}")
             story.append(Paragraph("<br/>".join(lines) or "No summary fields available.", styles["BodyText"]))
+            signal_review = summ.get("signal_review")
+            if signal_review:
+                from xml.sax.saxutils import escape as xml_escape
+                story.append(Paragraph("Quantitative EEG signal screening", styles["Heading4"]))
+                overview = [
+                    f"Analysis window: {signal_review.get('analysis_window_start_seconds', 0)}–"
+                    f"{signal_review.get('analysis_window_start_seconds', 0) + signal_review.get('analysis_window_seconds', 0)} s",
+                    f"Channels processed: {signal_review.get('channels_processed', 0)}",
+                    f"Usable channels: {signal_review.get('usable_channels', 0)}",
+                    f"Channels with quality flags: {signal_review.get('channels_with_quality_flags', 0)}",
+                    f"Generic transient candidates: {signal_review.get('transient_candidate_count', 0)}",
+                ]
+                story.append(Paragraph("<br/>".join(xml_escape(x) for x in overview), styles["BodyText"]))
+                channel_rows = [["Channel", "RMS (µV)", "Peak-to-peak (µV)", "Dominant Hz", "Quality flags"]]
+                for channel in signal_review.get("channels", [])[:32]:
+                    if not channel.get("usable"):
+                        channel_rows.append([str(channel.get("channel", "")), "—", "—", "—", str(channel.get("reason", "unavailable"))[:60]])
+                        continue
+                    channel_rows.append([
+                        str(channel.get("channel", "")),
+                        str(channel.get("rms_uV", "—")),
+                        str(channel.get("peak_to_peak_uV", "—")),
+                        str(channel.get("dominant_frequency_hz") or "—"),
+                        ", ".join(channel.get("quality_flags", []))[:70] or "None flagged",
+                    ])
+                channel_table = Table(channel_rows, repeatRows=1, colWidths=[25*mm, 27*mm, 32*mm, 24*mm, 70*mm])
+                channel_table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dceef1")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                    ("PADDING", (0, 0), (-1, -1), 4),
+                    ("FONTSIZE", (0, 0), (-1, -1), 7),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]))
+                story.append(channel_table)
+                candidates = signal_review.get("transient_candidates_top25", [])
+                if candidates:
+                    story.append(Paragraph("Generic transient candidates for manual review (not spike/seizure detections)", styles["Heading5"]))
+                    candidate_lines = [
+                        f"{item.get('channel')} at {item.get('time_seconds')} s · {item.get('amplitude_uV')} µV"
+                        for item in candidates[:15]
+                    ]
+                    story.append(Paragraph("<br/>".join(xml_escape(x) for x in candidate_lines), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(str(signal_review.get("interpretation", ""))), styles["Italic"]))
+                story.append(Paragraph(xml_escape(str(signal_review.get("coverage_note", ""))), styles["BodyText"]))
             wording_review = summ.get("report_wording_review")
             if wording_review:
                 from xml.sax.saxutils import escape as xml_escape
