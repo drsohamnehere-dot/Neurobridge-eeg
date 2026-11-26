@@ -543,7 +543,7 @@ def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
 
 
 @app.post("/api/files/{file_id}/analyse")
-def analyse_file(file_id: str, _: None = Depends(require_auth)):
+def analyse_file(file_id: str, ocr: bool = True, _: None = Depends(require_auth)):
     rec = get_file_record(file_id)
     ext, path = rec["extension"], rec["path"]
     try:
@@ -553,7 +553,7 @@ def analyse_file(file_id: str, _: None = Depends(require_auth)):
         elif ext in {".edf", ".bdf"}:
             summary = analyse_edf(path)
         elif ext == ".pdf":
-            summary, extracted_text = analyse_pdf(path)
+            summary, extracted_text = analyse_pdf(path, run_ocr=ocr)
         elif ext in {".png", ".jpg", ".jpeg", ".webp"}:
             from PIL import Image
             im = Image.open(path)
