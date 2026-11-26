@@ -38,7 +38,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="NeuroBridge EEG Workbench API", version="3.0.2")
+app = FastAPI(title="NeuroBridge EEG Workbench API", version="3.1.0")
 
 # Optional CORS for a Netlify-hosted frontend calling this backend directly.
 # Large EEG file uploads go browser -> backend directly; they do not pass through
@@ -176,7 +176,7 @@ def current_revision() -> int:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "NeuroBridge API", "version": "3.0.0", "storage": "persistent volume required for cloud hosting"}
+    return {"ok": True, "service": "NeuroBridge API", "version": "3.1.0", "storage": "persistent volume required for cloud hosting"}
 
 
 @app.post("/api/auth/login")
@@ -487,27 +487,64 @@ def analyse_table(path: Path, ext: str) -> dict[str, Any]:
 
 
 def analyse_edf(path: Path) -> dict[str, Any]:
+    raw = None
     try:
         import mne
+        from server.eeg_signal_review import build_signal_review
+
         raw = mne.io.read_raw(path, preload=False, verbose="ERROR")
         sf = float(raw.info["sfreq"])
         n = int(raw.n_times)
+        if not np.isfinite(sf) or sf <= 0 or n <= 0:
+            raise ValueError("The recording has invalid sampling metadata or no samples.")
         picks = mne.pick_types(raw.info, eeg=True, exclude=[])
         names = [raw.ch_names[i] for i in picks]
-        summary = {"kind": "edf_bdf", "sampling_rate_hz": sf, "duration_seconds": n / sf,
-                   "sample_count": n, "channel_count": len(raw.ch_names), "eeg_channel_count": len(names),
-                   "channel_names": raw.ch_names, "eeg_channels": names,
-                   "annotations": [{"onset": float(a["onset"]), "duration": float(a["duration"]), "description": str(a["description"])} for a in raw.annotations[:500]],
-                   "limitations": ["This is file-structure and signal-metadata review, not clinical EEG interpretation.",
-                                   "No seizure detector or validated clinical classifier is included."]}
+        duration = n / sf
+        summary = {
+            "kind": "edf_bdf",
+            "sampling_rate_hz": sf,
+            "duration_seconds": duration,
+            "sample_count": n,
+            "channel_count": len(raw.ch_names),
+            "eeg_channel_count": len(names),
+            "channel_names": raw.ch_names,
+            "eeg_channels": names,
+            "annotations": [
+                {"onset": float(a["onset"]), "duration": float(a["duration"]), "description": str(a["description"])}
+                for a in raw.annotations[:500]
+            ],
+            "limitations": [
+                "Signal features describe only the bounded initial analysis window, not necessarily the full recording.",
+                "Transient candidates are heuristic review prompts, not epileptiform-discharge or seizure detections.",
+                "No validated clinical EEG classifier is included; expert review of the raw EEG is required.",
+            ],
+        }
         if len(picks) and n:
-            stop = min(n, int(sf * 30))
-            data = raw.get_data(picks=picks[:min(32, len(picks))], start=0, stop=stop)
-            summary["first_30s_channel_rms"] = {raw.ch_names[picks[i]]: float(np.sqrt(np.mean(np.square(data[i])))) for i in range(data.shape[0])}
-        raw.close()
+            selected_picks = picks[:min(32, len(picks))]
+            window_seconds = min(120.0, duration)
+            stop = min(n, max(1, int(round(sf * window_seconds))))
+            data = raw.get_data(picks=selected_picks, start=0, stop=stop, reject_by_annotation=None)
+            selected_names = [raw.ch_names[i] for i in selected_picks]
+            summary["signal_review"] = build_signal_review(
+                data_volts=data,
+                sfreq=sf,
+                channel_names=selected_names,
+                recording_duration_seconds=duration,
+                window_start_seconds=0.0,
+            )
+            summary["analysis_channels_limited_to"] = 32
+        else:
+            summary["signal_review"] = {
+                "status": "not_available",
+                "interpretation": "No EEG channels were identified in this file.",
+                "channels_processed": 0,
+            }
         return summary
     except Exception as e:
         raise ValueError(f"EDF/BDF reader failed: {e}")
+    finally:
+        if raw is not None:
+            raw.close()
 
 
 def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
