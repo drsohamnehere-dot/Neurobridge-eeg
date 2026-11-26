@@ -16,8 +16,8 @@ UNCERTAIN = re.compile(
     r"\b(possible|possibly|suspicious for|questionable|equivocal|cannot exclude|cannot rule out|may represent|versus)\b",
     re.I,
 )
-NEGATED = re.compile(
-    r"\b(no|not|without|absent|absence of|negative for|free of|lack of)\b",
+NEGATED_PREFIX = re.compile(
+    r"\b(no|not|without|absence of|negative for|free of|lack of)\s+(?:[a-z]+\s+){0,4}$",
     re.I,
 )
 NORMAL = re.compile(
