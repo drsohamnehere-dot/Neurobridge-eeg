@@ -38,7 +38,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="NeuroBridge EEG Workbench API", version="3.0.1")
+app = FastAPI(title="NeuroBridge EEG Workbench API", version="3.0.2")
 
 # Optional CORS for a Netlify-hosted frontend calling this backend directly.
 # Large EEG file uploads go browser -> backend directly; they do not pass through
