@@ -510,15 +510,31 @@ def analyse_edf(path: Path) -> dict[str, Any]:
         raise ValueError(f"EDF/BDF reader failed: {e}")
 
 
-def analyse_pdf(path: Path) -> tuple[dict[str, Any], str]:
+def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
     from server.report_wording import review_report_wording
     doc = pdf_document(path)
-    texts = [p.get_text("text") for p in doc]
+    from server.pdf_ocr import extract_scanned_page_text
+    texts = []
+    ocr_attempted = 0
+    ocr_success = 0
+    for index, page in enumerate(doc):
+        page_text = page.get_text("text") or ""
+        if len(page_text.strip()) < 25 and run_ocr and index < 20:
+            scanned_text, ocr_result = extract_scanned_page_text(page, index, enabled=True)
+            if ocr_result not in {"tesseract_unavailable", "page_limit"}:
+                ocr_attempted += 1
+            if scanned_text:
+                page_text = (page_text + "\n" + scanned_text).strip()
+                ocr_success += 1
+        texts.append(page_text)
     text = "\n\n".join(f"[PAGE {i+1}]\n{t}" for i, t in enumerate(texts) if t.strip())
     result = {"kind": "pdf_document", "page_count": len(doc),
               "pages_with_embedded_text": sum(bool(t.strip()) for t in texts),
-              "text_extraction": "embedded PDF text" if text.strip() else "no embedded text detected; likely scanned/image PDF",
+              "text_extraction": "embedded PDF text and optional OCR" if text.strip() else "no readable text extracted",
               "extracted_characters": len(text),
+              "ocr_status": "disabled" if not run_ocr else ("completed" if ocr_success else "unavailable_or_not_needed"),
+              "ocr_pages_attempted": ocr_attempted,
+              "ocr_pages_with_text": ocr_success,
               "report_wording_review": review_report_wording(text),
               "limitations": ["Scanned page images are not interpreted as raw EEG waveforms.",
                               "A PDF report is not a substitute for the original digital EEG recording."]}
