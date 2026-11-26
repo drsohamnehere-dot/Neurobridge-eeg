@@ -827,6 +827,21 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
         ft.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#dceef1")),("GRID",(0,0),(-1,-1),0.3,colors.grey),
                                 ("PADDING",(0,0),(-1,-1),5),("VALIGN",(0,0),(-1,-1),"TOP")]))
         story += [ft, Spacer(1, 10), Paragraph("Technical analyses", styles["Heading2"])]
+        if not analyses:
+            if files:
+                empty_message = (
+                    "Files are attached to this study, but no analysis has been saved yet. "
+                    "Open Signal Review, choose each PDF, run Analyse, and wait for the "
+                    "saved confirmation. Then generate this report again."
+                )
+            else:
+                empty_message = (
+                    "No files are attached to this study, so no PDF text or EEG report wording "
+                    "could be reviewed. Open the Uploads section and upload the EEG report while "
+                    "this study is selected. If the file was uploaded earlier, use Attach unassigned "
+                    "files. Then open Signal Review, run Analyse on the PDF, and generate this report again."
+                )
+            story.append(Paragraph(empty_message, styles["BodyText"]))
         for a in analyses:
             summ = json.loads(a["summary_json"])
             story.append(Paragraph(a["original_name"], styles["Heading3"]))
