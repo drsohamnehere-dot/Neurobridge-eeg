@@ -67,7 +67,10 @@ def review_report_wording(text: str) -> dict:
     normal_evidence = []
     for page_number, page_text in pages:
         for sentence in re.split(r"(?<=[.!?;])\s+|\n+", page_text):
-            if NORMAL.search(sentence):
+            if NORMAL.search(sentence) and not UNCERTAIN.search(sentence) and not re.search(
+                r"\\b(not|no longer|outside|abnormal|abnormality)\\b.{0,60}\\b(normal EEG|within normal limits|unremarkable EEG)\\b",
+                sentence, re.I
+            ):
                 normal_evidence.append({"page": page_number, "wording": sentence.strip()[:360]})
     if normal_evidence:
         results.append({
