@@ -15,6 +15,7 @@ import uuid
 import sqlite3
 import mimetypes
 import logging
+import fitz
 from pathlib import Path
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -93,6 +94,36 @@ def safe_name(name):
     name = Path(name.replace("\\", "/")).name
     name = re.sub(r"[^A-Za-z0-9._ -]", "_", name).strip(" .")
     return (name or "upload.bin")[:120]
+    
+def render_eeg_pdf(pdf_path, zoom=2.0, max_pages=120):
+    import fitz
+
+    images = []
+
+    with fitz.open(pdf_path) as pdf:
+        if pdf.is_encrypted:
+            raise ValueError("PDF is password protected")
+
+        if len(pdf) == 0:
+            raise ValueError("Empty PDF")
+
+        if len(pdf) > max_pages:
+            raise ValueError("Too many pages")
+
+        for number, page in enumerate(pdf):
+            pix = page.get_pixmap(
+                matrix=fitz.Matrix(zoom, zoom),
+                alpha=False
+            )
+
+            images.append({
+                "page_number": number + 1,
+                "image": pix.tobytes("png"),
+                "width": pix.width,
+                "height": pix.height
+            })
+
+    return images
 
 
 class Handler(BaseHTTPRequestHandler):
