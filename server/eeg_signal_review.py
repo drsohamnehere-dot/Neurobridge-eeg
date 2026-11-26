@@ -23,7 +23,7 @@ def _area(power: np.ndarray, freqs: np.ndarray, low: float, high: float) -> floa
     mask = (freqs >= low) & (freqs < high)
     if int(mask.sum()) < 2:
         return None
-    return float(np.trapezoid(power[mask], freqs[mask]))
+    return float(np.trapz(power[mask], freqs[mask]))
 
 
 def _channel_features(signal_volts: np.ndarray, sfreq: float) -> dict[str, Any]:
