@@ -1,0 +1,22 @@
+NEUROBRIDGE — TODAY SETUP (YOUR NETLIFY DOMAIN ALREADY FILLED IN)
+
+Your Netlify website: https://eegabnormalityfindings.netlify.app
+
+IMPORTANT: Your current Netlify screen says “Backend unavailable”. The frontend is up, but it has no working Render API address yet. Do not keep trying access codes until the backend is deployed.
+
+1) Download and extract this ZIP.
+2) Create a PRIVATE GitHub repository named neurobridge-eeg-workbench.
+3) In the repository, choose Add file > Upload files. Upload the CONTENTS of the extracted folder (not the enclosing folder). Commit changes. Confirm render.yaml, Dockerfile, server/, frontend/, netlify_site/ are visible at repository root.
+4) Open https://dashboard.render.com/ and sign in. Choose New > Blueprint. Connect GitHub and select neurobridge-eeg-workbench. Render reads render.yaml.
+5) If asked for NB_ACCESS_CODE, create a new private access code. Do not use your OpenAI API key. NB_SECRET_KEY should be generated automatically by Render.
+6) Create/deploy. The included Render file already allows your exact Netlify domain: https://eegabnormalityfindings.netlify.app . The service includes a persistent 10 GB disk; this requires a paid Render plan.
+7) Wait until Render status says Live. Open the service URL plus /api/health, e.g. https://YOUR-SERVICE.onrender.com/api/health . It must show JSON with healthy status. Copy the base service URL.
+8) IMPORTANT: Set Netlify frontend API URL. In GitHub open netlify_site/config.js, press Edit, replace YOUR-RENDER-SERVICE with your actual Render service hostname, keeping /api at the end. Example: window.NB_API_BASE = "https://neurobridge-eeg-workbench.onrender.com/api"; Commit.
+9) In Netlify, open your site > Site configuration > Build & deploy > Continuous deployment. Connect the same GitHub repository (if not already connected). Base directory must be blank. Publish directory must be netlify_site. Build command blank. Trigger a new production deploy.
+10) Open https://eegabnormalityfindings.netlify.app, refresh, enter the NB_ACCESS_CODE you set in Render. Top-right status should say Backend online.
+
+IF YOU DO NOT WANT TO CONNECT NETLIFY TO GITHUB: after Render says Live, simply open the Render service root URL. Render serves both the app and API on the same domain; you can use that instead of Netlify.
+
+If it fails: (a) Render status must be Live; (b) /api/health must open; (c) config.js must contain the exact Render URL; (d) Render NB_CORS_ORIGINS must equal https://eegabnormalityfindings.netlify.app with no trailing slash; (e) redeploy Netlify after editing config.js.
+
+Do not upload identifiable patient EEG until institutional approval, access controls, data retention and backups have been confirmed. Use synthetic/de-identified files for initial testing.

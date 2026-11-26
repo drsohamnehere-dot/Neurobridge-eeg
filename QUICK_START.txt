@@ -1,0 +1,30 @@
+NEUROBRIDGE EEG WORKBENCH v3.0.1 — DEPLOYMENT FIX
+
+WHY THE OLD NETLIFY LINK SHOWED 404
+The old ZIP nested index.html under neurobridge_v3/frontend/. Netlify had no index.html in its selected publish root. This ZIP includes netlify.toml (publish = netlify_site) and a separate Netlify-ready folder containing index.html at its root.
+
+RECOMMENDED FULL-STACK DEPLOYMENT
+1. Extract this ZIP. The app project files are directly inside the extracted folder.
+2. Upload the extracted contents (not the ZIP itself) to a private GitHub repository root.
+3. In Render choose New -> Blueprint and connect the repository. Render reads render.yaml.
+4. Set NB_ACCESS_CODE during setup; Render generates NB_SECRET_KEY. The Blueprint provisions a 10 GB persistent disk mounted at /data (paid Render service required for persistent disks).
+5. Copy the Render service URL and test https://YOUR-SERVICE.onrender.com/api/health.
+6. Update netlify_site/config.js with: window.NB_API_BASE = "https://YOUR-SERVICE.onrender.com/api";
+7. Set Render NB_CORS_ORIGINS to the exact Netlify site origin, currently https://subtle-melomakarona-a94805.netlify.app (no trailing slash). Redeploy after changes.
+8. In Netlify connect the same GitHub repository. Keep Base directory blank; netlify.toml sets Publish directory to netlify_site. Deploy.
+9. Alternatively, open the Render service URL directly; it serves both frontend and backend.
+
+MANUAL NETLIFY DROP
+Upload the CONTENTS of netlify_site, not the parent project folder. Set config.js to the real Render API URL first. The published root must show index.html, app.js, config.js and styles.css.
+
+STORAGE
+Uploads, study records and ML models are saved by the backend under /data. Keep the persistent disk and take secure backups. Do not use ephemeral storage for research records.
+
+UPLOADS
+Browser upload progress displays percentage, bytes sent, speed and estimated remaining time. After transfer completes, it displays Saving until the backend confirms. Default per-file cap is 500 MB. From Netlify, browser uploads go directly to Render rather than through Netlify's proxy.
+
+MACHINE LEARNING
+Use protocol-labelled CSV/TSV data with task_label and trial_id. The baseline trains on predefined task classes, saves versioned models and supports held-out trial evaluation. New tabular files mark the model stale; retraining is a deliberate action. The sample is synthetic only.
+
+SAFETY
+This is an experimental research workbench, not a validated medical device. It does not read unrestricted thoughts or diagnose epilepsy/seizures. Use de-identified data and obtain institutional ethics/data-governance approval before human-data storage.

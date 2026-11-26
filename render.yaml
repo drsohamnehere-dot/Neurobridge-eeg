@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: neurobridge-eeg-workbench
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NB_DATA_DIR
+        value: /data
+      - key: NB_MAX_UPLOAD_MB
+        value: "500"
+      - key: NB_CORS_ORIGINS
+        value: "https://eegabnormalityfindings.netlify.app"
+      - key: NB_ACCESS_CODE
+        sync: false
+      - key: NB_SECRET_KEY
+        generateValue: true
+    disk:
+      name: neurobridge-data
+      mountPath: /data
+      sizeGB: 10

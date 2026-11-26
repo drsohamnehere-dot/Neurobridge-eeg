@@ -1,0 +1,12 @@
+NETLIFY 404 FIX — READ THIS
+
+The previous ZIP had no index.html in its outer root. It was located at neurobridge_v3/frontend/index.html, so Netlify was publishing the wrong directory.
+
+In this updated project:
+- Netlify publish directory is netlify_site (already set in netlify.toml).
+- netlify_site/index.html is at the correct publish root.
+- Manual Drop upload must use the CONTENTS of netlify_site, not the parent folder.
+
+Do NOT run the full FastAPI + SQLite + machine-learning backend on Netlify static hosting. Deploy it as the Docker service defined in render.yaml, then point netlify_site/config.js to that Render API. Configure NB_CORS_ORIGINS on Render with your exact Netlify origin. For uploads above 10 MB, the browser sends files directly to Render, bypassing Netlify proxy size/timeout constraints.
+
+Your screenshot also shows the Netlify project is marked Private. That setting limits access to your Netlify team/invited users; it is not the missing-index cause. Keep it private when testing with sensitive data. Make it public only if you deliberately want general URL access to the login page.

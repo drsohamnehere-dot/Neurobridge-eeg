@@ -1,0 +1,15 @@
+services:
+  neurobridge:
+    build: .
+    container_name: neurobridge-workbench
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      NB_DATA_DIR: /data
+      NB_ACCESS_CODE: ${NB_ACCESS_CODE:-change-this-access-code}
+      NB_SECRET_KEY: ${NB_SECRET_KEY:-change-this-secret-key-before-deploying}
+      NB_MAX_UPLOAD_MB: ${NB_MAX_UPLOAD_MB:-500}
+      NB_CORS_ORIGINS: ${NB_CORS_ORIGINS:-}
+    volumes:
+      - ./data:/data
