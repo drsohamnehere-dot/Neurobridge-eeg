@@ -518,9 +518,10 @@ def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
     ocr_attempted = 0
     ocr_success = 0
     ocr_unavailable = False
+    ocr_page_limit_reached = False
     for index, page in enumerate(doc):
         page_text = page.get_text("text") or ""
-        if len(page_text.strip()) < 25 and run_ocr and index < 20:
+        if len(page_text.strip()) < 25 and run_ocr and index < 5:
             scanned_text, ocr_result = extract_scanned_page_text(page, index, enabled=True)
             if ocr_result == "tesseract_unavailable":
                 ocr_unavailable = True
@@ -529,6 +530,8 @@ def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
             if scanned_text:
                 page_text = (page_text + "\n" + scanned_text).strip()
                 ocr_success += 1
+        elif len(page_text.strip()) < 25 and run_ocr and index >= 5:
+            ocr_page_limit_reached = True
         texts.append(page_text)
     text = "\n\n".join(f"[PAGE {i+1}]\n{t}" for i, t in enumerate(texts) if t.strip())
     if not run_ocr:
@@ -541,6 +544,8 @@ def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
         ocr_status = "partially_completed"
     elif ocr_attempted:
         ocr_status = "attempted_no_text"
+    elif ocr_page_limit_reached:
+        ocr_status = "page_limit"
     else:
         ocr_status = "not_needed"
     result = {"kind": "pdf_document", "page_count": len(doc),
