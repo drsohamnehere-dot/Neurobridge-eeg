@@ -511,6 +511,7 @@ def analyse_edf(path: Path) -> dict[str, Any]:
 
 
 def analyse_pdf(path: Path) -> tuple[dict[str, Any], str]:
+    from server.report_wording import review_report_wording
     doc = pdf_document(path)
     texts = [p.get_text("text") for p in doc]
     text = "\n\n".join(f"[PAGE {i+1}]\n{t}" for i, t in enumerate(texts) if t.strip())
@@ -518,6 +519,7 @@ def analyse_pdf(path: Path) -> tuple[dict[str, Any], str]:
               "pages_with_embedded_text": sum(bool(t.strip()) for t in texts),
               "text_extraction": "embedded PDF text" if text.strip() else "no embedded text detected; likely scanned/image PDF",
               "extracted_characters": len(text),
+              "report_wording_review": review_report_wording(text),
               "limitations": ["Scanned page images are not interpreted as raw EEG waveforms.",
                               "A PDF report is not a substitute for the original digital EEG recording."]}
     doc.close()
