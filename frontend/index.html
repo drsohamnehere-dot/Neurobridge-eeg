@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#071321"><title>NeuroBridge EEG Workbench</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app-shell">
+<header class="topbar">
+  <div class="brand"><div class="brand-mark">🧠</div><div><div class="brand-name">NEUROBRIDGE</div><div class="brand-sub">EEG WAVEFORM REVIEW · IMAGE-ASSISTED RESEARCH DRAFT · v3.0</div></div></div>
+  <div class="top-actions"><span class="api-status" id="apiStatus"><i></i> Checking server</span><button class="ghost-btn" id="refreshBtn">↻ Refresh</button><button class="ghost-btn" id="logoutBtn">Sign out</button></div>
+</header>
+<main class="main-wrap">
+  <div class="hero-row"><div><div class="eyebrow">NEUROBRIDGE NB-01 · RESEARCH WORKBENCH</div><h1>EEG data, organised and reviewable.</h1><p class="muted">Upload, preserve, inspect, and build a controlled research dataset.</p></div><div class="hero-chip"><span class="pulse-dot"></span> Persistent backend enabled</div></div>
+  <section class="stats-grid" id="statsGrid">
+    <div class="stat-card"><span>Stored files</span><b id="statFiles">—</b></div><div class="stat-card"><span>Studies</span><b id="statStudies">—</b></div><div class="stat-card"><span>Analyses</span><b id="statAnalyses">—</b></div><div class="stat-card"><span>Server storage used</span><b id="statStorage">—</b></div>
+  </section>
+  <nav class="steps" aria-label="Workflow">
+    <button class="step active" data-tab="waveforms"><span>1.</span> Waveforms</button><button class="step" data-tab="details"><span>2.</span> Study details</button><button class="step" data-tab="review"><span>3.</span> AI & ML review</button><button class="step" data-tab="report"><span>4.</span> Clinical PDF</button>
+  </nav>
+
+  <section class="panel tab-panel" id="tab-waveforms">
+    <div class="panel-head"><div><div class="eyebrow">01 / INGESTION</div><h2>Upload EEG files and waveform pages</h2><p class="muted">Add digital EEG recordings, report PDFs, screenshots, or exported signal tables. Files are sent to the configured backend and saved on its persistent storage volume.</p></div><span class="pill">Up to 500 MB / file</span></div>
+    <div class="upload-zone" id="dropZone"><div class="upload-icon">⇧</div><h3>Drop files here or browse your device</h3><p>Supports EDF · BDF · CSV · TSV · TXT · JSON · PDF · PNG · JPG · WEBP</p><div class="upload-buttons"><label class="primary-btn" for="fileInput">Choose files</label><button class="secondary-btn" id="pasteHint">Paste screenshot</button></div><input id="fileInput" type="file" multiple accept=".edf,.bdf,.csv,.tsv,.txt,.json,.pdf,.png,.jpg,.jpeg,.webp" hidden></div>
+    <div class="upload-batch hidden" id="batchProgress"><div class="batch-top"><div><strong id="batchTitle">Uploading files</strong><div class="muted small" id="batchSub">Preparing transfer…</div></div><strong class="batch-percent" id="batchPercent">0%</strong></div><div class="progress-track"><div class="progress-fill" id="batchBar"></div></div><div class="batch-bottom"><span id="batchBytes">0 B / 0 B</span><span id="batchEta">Waiting for upload…</span></div></div>
+    <div class="queue-list" id="uploadQueue"></div>
+    <div class="section-row"><div><h3>Files stored on server</h3><p class="muted small">This list refreshes automatically while the application is open.</p></div><button class="secondary-btn" id="reloadFiles">Refresh list</button></div>
+    <div class="table-wrap"><table><thead><tr><th>File</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Status</th><th>Action</th></tr></thead><tbody id="filesTable"><tr><td colspan="6" class="empty">No uploads yet.</td></tr></tbody></table></div>
+    <div class="section-row"><div><h3>Waveform screenshots</h3><p class="muted small">Select uploaded screenshots to include in the reviewer PDF. Maximum 8 images and PDF pages combined.</p></div></div><div class="image-select-grid" id="imageSelectionGrid"><div class="empty">Uploaded PNG/JPG/WEBP images will appear here.</div></div>
+    <div class="note-field"><label for="quickNote">Source EEG report text (optional)</label><textarea id="quickNote" rows="4" placeholder="Paste the written EEG findings or impression here. Save this with the study under Study details."></textarea><div class="muted tiny">Do not paste identifying patient information unless your institution has authorised this storage and access.</div></div>
+  </section>
+
+  <section class="panel tab-panel hidden" id="tab-details">
+    <div class="panel-head"><div><div class="eyebrow">02 / METADATA</div><h2>Study details</h2><p class="muted">Keep acquisition and study context attached to the uploaded files.</p></div><span class="pill">Saved to database</span></div>
+    <div class="study-picker"><div class="field"><label>Open saved study</label><select id="existingStudy"><option value="">Create a new study…</option></select></div><div class="study-picker-actions"><button class="secondary-btn" id="newStudy">＋ New study</button><button class="secondary-btn" id="attachUnassigned">Attach unassigned uploads</button></div></div>
+    <div class="form-grid">
+      <div class="field wide"><label>Study title</label><input id="studyTitle" placeholder="e.g. Pilot EEG recording — Session 01"></div>
+      <div class="field"><label>De-identified subject code</label><input id="subjectCode" placeholder="e.g. NB-P001"></div>
+      <div class="field"><label>Study date</label><input id="studyDate" type="date"></div>
+      <div class="field"><label>Age (optional)</label><input id="studyAge" type="number" min="0" max="120" placeholder="Age in years"></div>
+      <div class="field"><label>Sex (optional)</label><select id="studySex"><option value="">Not specified</option><option>Female</option><option>Male</option><option>Other / self-described</option><option>Not recorded</option></select></div>
+      <div class="field"><label>EEG montage</label><input id="studyMontage" placeholder="e.g. 10–20 longitudinal bipolar"></div>
+      <div class="field"><label>Sampling rate (Hz)</label><input id="studyRate" type="number" min="1" step="any" placeholder="e.g. 256"></div>
+      <div class="field wide"><label>Recording context / protocol</label><textarea id="studyContext" rows="3" placeholder="Awake, eyes open/closed, activation procedures, event-marker protocol, device and reference details…"></textarea></div>
+      <div class="field wide"><label>Source report text</label><textarea id="studySource" rows="5" placeholder="Paste the EEG report's findings or impression. Keep the original wording and note its source."></textarea></div>
+    </div>
+    <div class="actions-row"><button class="primary-btn" id="saveStudy">Save study to backend</button><span class="muted small" id="studySaveStatus">Not saved yet.</span></div>
+    <div class="privacy-note"><strong>Privacy:</strong> Use a de-identified code. A shared access code is not a complete patient-account or hospital information system. Do not upload identifiable patient records to an internet-hosted instance without institutional approval, consent, and an approved data-governance arrangement.</div>
+  </section>
+
+  <section class="panel tab-panel hidden" id="tab-review">
+    <div class="panel-head"><div><div class="eyebrow">03 / SIGNAL REVIEW</div><h2>Technical analysis and research ML</h2><p class="muted">Run file-level checks, inspect PDF pages, and train a constrained task classifier from independently labelled trials.</p></div><span class="pill">Research-only</span></div>
+    <div class="review-grid"><div class="review-card"><div class="card-kicker">SIGNAL / FILE ANALYSIS</div><h3>Analyse uploaded file</h3><p class="muted small">CSV/TSV: channel statistics and exploratory band power. EDF/BDF: recording metadata and channel checks. PDF: page count and embedded text extraction.</p><label for="analysisFile">Choose a stored file</label><select id="analysisFile"><option value="">Select a file…</option></select><button class="primary-btn" id="analyseBtn">Run technical analysis</button><div id="analysisStatus" class="small muted status-line"></div></div>
+      <div class="review-card"><div class="card-kicker">SUPERVISED MACHINE LEARNING</div><h3>Train / retrain model</h3><p class="muted small">The baseline learns predefined task labels from CSV/TSV samples grouped by trial. It does not learn from PDF screenshots or unlabeled routine clinical EEG.</p><div class="requirements"><span>Required columns</span><code>task_label</code><code>trial_id</code><span>+ numeric EEG channels</span></div><div class="small demo-links"><a href="/sample_data/demo_labelled_synthetic.csv" download>Download synthetic ML demo CSV</a><span> · </span><a href="/sample_data/sample_template.csv" download>Download CSV template</a></div><button class="primary-btn" id="trainBtn">Train / retrain research model</button><div id="modelStatus" class="small muted status-line">No training run yet.</div></div>
+      <div class="review-card"><div class="card-kicker">MODEL INFERENCE</div><h3>Predict predefined task class</h3><p class="muted small">Apply a saved model to a new CSV/TSV with matching numeric channels and a trial_id column. task_label is not required in the prediction file.</p><label for="predictionModel">Saved model</label><select id="predictionModel"><option value="">No trained model</option></select><label for="predictionFile">New recording file</label><select id="predictionFile"><option value="">Select CSV/TSV…</option></select><button class="primary-btn" id="predictBtn">Predict trial classes</button><div id="predictionStatus" class="small muted status-line"></div><div id="predictionOutput" class="analysis-text"></div></div></div>
+    <div class="analysis-output hidden" id="analysisOutput"><div class="section-row"><h3>Analysis result</h3><span class="pill" id="analysisType">Technical summary</span></div><div id="analysisMetrics" class="metrics-grid"></div><div id="analysisText" class="analysis-text"></div></div>
+    <div class="section-row"><div><h3>PDF page review</h3><p class="muted small">Select a PDF to view its pages. This is page viewing, not raw EEG signal extraction.</p></div></div>
+    <div class="pdf-tools"><select id="pdfFile"><option value="">Select PDF…</option></select><button class="secondary-btn" id="loadPdf">Load page list</button></div><div class="page-save-row"><span class="muted small">Selected report pages: <strong id="selectedPageCount">0 / 8</strong></span><button class="secondary-btn" id="saveSelectedPages">Save selected pages to active study</button></div><div class="pdf-pages" id="pdfPages"></div>
+    <div class="section-row"><div><h3>Saved models</h3><p class="muted small">A newly uploaded tabular dataset marks the previous model as stale; retrain explicitly to update it.</p></div></div><div id="modelsList" class="models-list"><div class="empty">No saved models yet.</div></div>
+  </section>
+
+  <section class="panel tab-panel hidden" id="tab-report">
+    <div class="panel-head"><div><div class="eyebrow">04 / DOCUMENTATION</div><h2>Generate technical review PDF</h2><p class="muted">Create a downloadable, database-backed summary of study metadata, uploaded files, and technical analyses.</p></div><span class="pill">Reviewer draft</span></div>
+    <div class="report-preview"><div class="report-icon">PDF</div><div><strong>NeuroBridge technical review summary</strong><p class="muted small">Includes file inventory, technical-analysis metadata, and explicit clinical-safety limitations.</p></div></div>
+    <button class="primary-btn" id="generateReport">Generate and download PDF</button><div class="status-line small muted" id="reportStatus"></div>
+    <div class="privacy-note warning"><strong>Not a diagnostic report.</strong> The PDF is a technical draft only. It must not be used to diagnose epilepsy, rule out seizures, recommend treatment, or replace review of the complete recording by a qualified neurologist/neurophysiologist.</div>
+  </section>
+
+  <footer><div><strong>NEUROBRIDGE v3.0</strong><span> · Research prototype · Persistent server storage · ML baseline</span></div><p>Experimental research software. Not a validated EEG reader, medical device, diagnostic system, or unrestricted thought decoder.</p></footer>
+</main>
+</div>
+
+<div class="modal-backdrop" id="authModal"><div class="auth-card"><div class="brand-name">🧠 NEUROBRIDGE</div><h2>Private application access</h2><p class="muted">Enter the access code configured on the backend server.</p><label for="accessCode">Access code</label><input type="password" id="accessCode" placeholder="Private access code" autocomplete="current-password"><button class="primary-btn full" id="loginBtn">Open application</button><div class="status-line small" id="loginStatus">The access code is checked by the server.</div><div class="tiny muted">Access code protection is shared access, not individual user accounts.</div></div></div>
+<div class="toast" id="toast"></div>
+<script src="/config.js"></script><script src="/app.js" defer></script>
+</body></html>

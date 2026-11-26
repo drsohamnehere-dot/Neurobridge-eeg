@@ -1,0 +1,2 @@
+# Single-page application fallback only. API requests go directly to Render via config.js.
+/*  /index.html  200
