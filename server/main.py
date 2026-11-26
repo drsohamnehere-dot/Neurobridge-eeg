@@ -917,7 +917,7 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                         str(channel.get("dominant_frequency_hz") or "—"),
                         ", ".join(channel.get("quality_flags", []))[:70] or "None flagged",
                     ])
-                channel_table = Table(channel_rows, repeatRows=1, colWidths=[25*mm, 27*mm, 32*mm, 24*mm, 70*mm])
+                channel_table = Table(channel_rows, repeatRows=1, colWidths=[20*mm, 24*mm, 30*mm, 22*mm, 70*mm])
                 channel_table.setStyle(TableStyle([
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dceef1")),
                     ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
