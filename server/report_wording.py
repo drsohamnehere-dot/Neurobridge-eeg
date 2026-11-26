@@ -46,7 +46,7 @@ def review_report_wording(text: str) -> dict:
                 suffix = sentence[match.end():match.end() + 100]
                 if UNCERTAIN.search(sentence):
                     status = "context_uncertain"
-                elif NEGATED.search(prefix) or re.search(
+                elif NEGATED_PREFIX.search(prefix) or re.search(
                     r"\b(not seen|not observed|not identified|not present|were absent|was absent)\b",
                     suffix, re.I
                 ):
