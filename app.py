@@ -125,6 +125,31 @@ def render_eeg_pdf(pdf_path, zoom=2.0, max_pages=120):
 
     return images
 
+def extract_eeg_pdf_text(pdf_path, max_pages=120):
+    import fitz
+
+    extracted_pages = []
+
+    with fitz.open(pdf_path) as pdf:
+        if pdf.is_encrypted:
+            raise ValueError("PDF is password protected")
+
+        if len(pdf) == 0:
+            raise ValueError("Empty PDF")
+
+        if len(pdf) > max_pages:
+            raise ValueError("Too many pages")
+
+        for number, page in enumerate(pdf):
+            page_text = page.get_text("text").strip()
+
+            extracted_pages.append({
+                "page_number": number + 1,
+                "text": page_text
+            })
+
+    return extracted_pages
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "NeuroBridgeSimple/1.0"
