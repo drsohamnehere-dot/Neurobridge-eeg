@@ -529,7 +529,7 @@ def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
         texts.append(page_text)
     text = "\n\n".join(f"[PAGE {i+1}]\n{t}" for i, t in enumerate(texts) if t.strip())
     result = {"kind": "pdf_document", "page_count": len(doc),
-              "pages_with_embedded_text": sum(bool(t.strip()) for t in texts),
+              "pages_with_extracted_text": sum(bool(t.strip()) for t in texts),
               "text_extraction": "embedded PDF text and optional OCR" if text.strip() else "no readable text extracted",
               "extracted_characters": len(text),
               "ocr_status": "disabled" if not run_ocr else ("completed" if ocr_success else "unavailable_or_not_needed"),
@@ -816,7 +816,7 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
             summ = json.loads(a["summary_json"])
             story.append(Paragraph(a["original_name"], styles["Heading3"]))
             lines = []
-            for k in ["kind", "rows", "sample_count", "duration_seconds", "sampling_rate_estimate_hz", "channel_count", "page_count", "pages_with_embedded_text"]:
+            for k in ["kind", "rows", "sample_count", "duration_seconds", "sampling_rate_estimate_hz", "channel_count", "page_count", "pages_with_embedded_text", "pages_with_extracted_text", "ocr_status", "ocr_pages_attempted", "ocr_pages_with_text"]:
                 if k in summ:
                     lines.append(f"<b>{k.replace('_',' ').title()}:</b> {summ[k]}")
             story.append(Paragraph("<br/>".join(lines) or "No summary fields available.", styles["BodyText"]))
