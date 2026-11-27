@@ -33,7 +33,7 @@
 
   <section class="panel tab-panel hidden" id="tab-details">
     <div class="panel-head"><div><div class="eyebrow">02 / METADATA</div><h2>Study details</h2><p class="muted">Keep acquisition and study context attached to the uploaded files.</p></div><span class="pill">Saved to database</span></div>
-    <div class="study-picker"><div class="field"><label>Open saved study</label><select id="existingStudy"><option value="">Create a new study…</option></select></div><div class="study-picker-actions"><button class="secondary-btn" id="newStudy">＋ New study</button><button class="secondary-btn" id="attachUnassigned">Attach unassigned uploads</button></div></div>
+    <div class="study-picker"><div class="field"><label>Open saved study</label><select id="existingStudy"><option value="">Create a new study…</option></select></div><div class="study-picker-actions"><button class="secondary-btn" id="newStudy">＋ New study</button><button class="secondary-btn" id="attachUnassignedFromDetails">Attach unassigned uploads</button></div></div>
     <div class="form-grid">
       <div class="field wide"><label>Study title</label><input id="studyTitle" placeholder="e.g. Pilot EEG recording — Session 01"></div>
       <div class="field"><label>De-identified subject code</label><input id="subjectCode" placeholder="e.g. NB-P001"></div>
@@ -69,10 +69,11 @@
   </section>
 
   <section class="panel tab-panel hidden" id="tab-report">
-    <div class="panel-head"><div><div class="eyebrow">04 / DOCUMENTATION</div><h2>Generate technical review PDF</h2><p class="muted">Create a downloadable, database-backed summary of study metadata, uploaded files, and technical analyses.</p></div><span class="pill">Reviewer draft</span></div>
-    <div class="report-preview"><div class="report-icon">PDF</div><div><strong>NeuroBridge technical review summary</strong><p class="muted small">Includes file inventory, technical-analysis metadata, and explicit clinical-safety limitations.</p></div></div>
-    <button class="primary-btn" id="generateReport">Generate and download PDF</button><div class="status-line small muted" id="reportStatus"></div>
-    <div class="privacy-note warning"><strong>Not a diagnostic report.</strong> The PDF is a technical draft only. It must not be used to diagnose epilepsy, rule out seizures, recommend treatment, or replace review of the complete recording by a qualified neurologist/neurophysiologist.</div>
+    <div class="panel-head"><div><div class="eyebrow">05 / DOCUMENTATION</div><h2>Comprehensive EEG review PDF</h2><p class="muted">Compile study metadata, attached recordings, saved analyses, channel-level signal metrics, relative band-power, quality flags, and a specialist clinical-review checklist.</p></div><span class="pill">Clinician review draft</span></div>
+    <div class="report-preview"><div class="report-icon">PDF</div><div><strong>NeuroBridge comprehensive EEG technical report</strong><p class="muted small">Attached EDF/BDF recordings are screened automatically when the report is built, if they have not already been analysed.</p></div></div>
+    <div class="report-attach-option"><label><input type="checkbox" id="attachUnassignedForReport" checked> Attach all currently unassigned uploads to the selected study before generating this report</label><p class="muted tiny">Select the correct study first. This will associate every unassigned file in your account with that study.</p></div>
+    <button class="primary-btn" id="generateReport">Prepare analysis and generate comprehensive PDF</button><div class="status-line small muted" id="reportStatus"></div>
+    <div class="privacy-note warning"><strong>Important clinical limitation.</strong> This is not an autonomous final clinical interpretation or diagnosis. NeuroBridge currently performs bounded descriptive screening (up to the initial 120 seconds); it does not reliably identify or exclude epileptiform discharges or seizures. A qualified neurologist/neurophysiologist must review the complete original EEG and clinical context.</div>
   </section>
 
   <footer><div><strong>NEUROBRIDGE v3.0</strong><span> · Research prototype · Persistent server storage · ML baseline</span></div><p>Experimental research software. Not a validated EEG reader, medical device, diagnostic system, or unrestricted thought decoder.</p></footer>
