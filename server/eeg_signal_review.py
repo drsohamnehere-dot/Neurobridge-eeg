@@ -6,6 +6,7 @@ It does not diagnose epilepsy, identify seizures, or classify epileptiform disch
 from __future__ import annotations
 
 from typing import Any
+import re
 
 import numpy as np
 
@@ -17,6 +18,24 @@ BANDS = (
     ("beta_13_30_hz", 13.0, 30.0),
     ("low_gamma_30_45_hz", 30.0, 45.0),
 )
+
+
+SCALP_ELECTRODE_LABELS = {
+    "FP1","FP2","FPZ","F7","F5","F3","F1","FZ","F2","F4","F6","F8",
+    "AF7","AF3","AFZ","AF4","AF8","FT7","FC5","FC3","FC1","FCZ","FC2","FC4","FC6","FT8",
+    "T3","T7","C5","C3","C1","CZ","C2","C4","C6","T4","T8","TP7","CP5","CP3","CP1","CPZ","CP2","CP4","CP6","TP8",
+    "T5","P7","P5","P3","P1","PZ","P2","P4","P6","P8","T6","PO7","PO5","PO3","POZ","PO4","PO6","PO8","O1","OZ","O2",
+}
+
+def scalp_eeg_channel_indices(channel_names: list[str]) -> list[int]:
+    """Identify standard scalp electrodes; exclude auxiliary ECG/BP/DC/PG leads."""
+    result = []
+    for index, name in enumerate(channel_names):
+        text = re.sub(r"\\b(?:EEG|REF|LE|RE|AVG|AV)\\b", " ", str(name).upper())
+        tokens = [token for token in re.split(r"[^A-Z0-9]+", text) if token]
+        if any(token in SCALP_ELECTRODE_LABELS for token in tokens):
+            result.append(index)
+    return result
 
 
 def _area(power: np.ndarray, freqs: np.ndarray, low: float, high: float) -> float | None:
