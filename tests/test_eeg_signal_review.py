@@ -48,3 +48,27 @@ def test_signal_review_rejects_non_2d_data():
             channel_names=["F3"],
             recording_duration_seconds=1.0,
         )
+
+
+def test_scalp_channel_selection_excludes_auxiliary_channels():
+    from server.eeg_signal_review import scalp_eeg_channel_indices
+
+    labels = [
+        "PG1", "FP1", "FP2", "PG2", "F7", "F3", "FZ", "F4", "F8", "A1",
+        "T3", "C3", "CZ", "C4", "T4", "A2", "T5", "P3", "PZ", "P4",
+        "T6", "O1", "OZ", "O2", "X1", "X2", "X3", "X4", "BP1", "BP2",
+        "ECG", "BP4", "BP5", "BP6", "BP7", "BP8", "DC1", "DC2", "DC3", "DC4",
+    ]
+    indices = scalp_eeg_channel_indices(labels)
+    assert len(indices) == 20
+    assert [labels[i] for i in indices] == [
+        "FP1", "FP2", "F7", "F3", "FZ", "F4", "F8", "T3", "C3", "CZ",
+        "C4", "T4", "T5", "P3", "PZ", "P4", "T6", "O1", "OZ", "O2",
+    ]
+
+
+def test_scalp_channel_selection_supports_reference_and_bipolar_labels():
+    from server.eeg_signal_review import scalp_eeg_channel_indices
+
+    labels = ["EEG Fp1-Ref", "F3-C3", "ECG", "DC1", "A1"]
+    assert scalp_eeg_channel_indices(labels) == [0, 1]
