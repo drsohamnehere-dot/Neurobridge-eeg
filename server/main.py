@@ -245,7 +245,15 @@ def attach_unassigned_files(study_id: str, _: None = Depends(require_auth)):
         if not con.execute("SELECT 1 FROM studies WHERE id=?", (study_id,)).fetchone():
             raise HTTPException(404, "Study not found")
         cur = con.execute("UPDATE files SET study_id=? WHERE study_id IS NULL", (study_id,))
-        return {"attached": cur.rowcount}
+        attached = cur.rowcount
+        # Analyses created before a file was attached must follow that file into the study.
+        con.execute(
+            """UPDATE analyses SET study_id=?
+               WHERE study_id IS NULL
+               AND file_id IN (SELECT id FROM files WHERE study_id=?)""",
+            (study_id, study_id),
+        )
+        return {"attached": attached}
 
 
 @app.get("/api/studies/{study_id}/pages")
@@ -912,12 +920,61 @@ def predict_file(model_id: str, file_id: str, _: None = Depends(require_auth)):
 
 @app.get("/api/studies/{study_id}/report.pdf")
 def study_report(study_id: str, _: None = Depends(require_auth)):
+    # A report request also prepares any attached digital EEG recordings that have not
+    # yet been analysed. This is descriptive research screening, not clinical diagnosis.
     with db() as con:
         study = con.execute("SELECT * FROM studies WHERE id=?", (study_id,)).fetchone()
         if not study:
             raise HTTPException(404, "Study not found")
+        file_rows = con.execute("SELECT * FROM files WHERE study_id=? ORDER BY uploaded_at", (study_id,)).fetchall()
+
+    for file_row in file_rows:
+        rec = dict(file_row)
+        extension = str(rec.get("extension") or Path(rec.get("original_name") or "").suffix).lower()
+        if extension not in {".edf", ".bdf"}:
+            continue
+        recording_path = UPLOAD_DIR / rec["stored_name"]
+        if not recording_path.exists():
+            with db() as con:
+                con.execute(
+                    "UPDATE files SET status='error',error=? WHERE id=?",
+                    ("Original recording is not present in the current server storage. Re-upload the EDF/BDF file.", rec["id"]),
+                )
+            continue
+        with db() as con:
+            existing = con.execute(
+                "SELECT 1 FROM analyses WHERE file_id=? AND kind='edf_bdf' LIMIT 1",
+                (rec["id"],),
+            ).fetchone()
+        if existing:
+            continue
+        try:
+            summary = analyse_edf(recording_path)
+            with db() as con:
+                con.execute(
+                    """INSERT INTO analyses(id,file_id,study_id,created_at,kind,summary_json,extracted_text)
+                       VALUES(?,?,?,?,?,?,?)""",
+                    (str(uuid.uuid4()), rec["id"], study_id, now_iso(), "edf_bdf", json.dumps(summary), ""),
+                )
+                con.execute("UPDATE files SET status='analysed',error=NULL WHERE id=?", (rec["id"],))
+        except Exception as e:
+            with db() as con:
+                con.execute(
+                    "UPDATE files SET status='error',error=? WHERE id=?",
+                    ("Automatic EDF/BDF screening failed: " + str(e)[:400], rec["id"]),
+                )
+
+    with db() as con:
+        study = con.execute("SELECT * FROM studies WHERE id=?", (study_id,)).fetchone()
         files = con.execute("SELECT * FROM files WHERE study_id=? ORDER BY uploaded_at", (study_id,)).fetchall()
-        analyses = con.execute("SELECT a.*,f.original_name FROM analyses a JOIN files f ON f.id=a.file_id WHERE a.study_id=? ORDER BY a.created_at", (study_id,)).fetchall()
+        # Join through the file's current study assignment so older analyses are not lost
+        # when their source file was attached to a study after the analysis was run.
+        analyses = con.execute(
+            """SELECT a.*,f.original_name,f.extension,f.size_bytes,f.status
+               FROM analyses a JOIN files f ON f.id=a.file_id
+               WHERE f.study_id=? ORDER BY a.created_at""",
+            (study_id,),
+        ).fetchall()
         selected_pages = con.execute("SELECT p.file_id,p.page_num,f.original_name,f.stored_name,f.extension FROM study_pages p JOIN files f ON f.id=p.file_id WHERE p.study_id=? ORDER BY f.original_name,p.page_num", (study_id,)).fetchall()
     try:
         from reportlab.lib import colors
@@ -929,7 +986,8 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
         doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=16*mm, bottomMargin=16*mm)
         styles = getSampleStyleSheet()
         story = [Paragraph("NEUROBRIDGE — EEG RESEARCH WORKBENCH", styles["Title"]),
-                 Paragraph("Technical review summary · Draft for qualified reviewer", styles["Heading2"]), Spacer(1, 8)]
+                 Paragraph("Comprehensive EEG technical analysis · Clinician review draft", styles["Heading2"]),
+                 Paragraph("Automated descriptive screening only — clinical interpretation must be completed by a qualified EEG specialist.", styles["Italic"]), Spacer(1, 8)]
         s = dict(study)
         details = [["Study title", s.get("title") or "—"], ["De-identified subject code", s.get("subject_code") or "—"],
                    ["Age / sex", f"{s.get('age') or '—'} / {s.get('sex') or '—'}"], ["Study date", s.get("study_date") or "—"],
@@ -942,7 +1000,12 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
         for f in files:
             file_rows.append([f["original_name"], f["extension"], f"{f['size_bytes']/1048576:.2f}", f["status"]])
         if len(file_rows) == 1:
-            file_rows.append(["No files uploaded", "—", "—", "—"])
+            file_rows.append(["No files attached to this study", "—", "—", "—"])
+        else:
+            for row_index, file_row in enumerate(files, start=1):
+                stored_path = UPLOAD_DIR / file_row["stored_name"]
+                if not stored_path.exists():
+                    file_rows[row_index][3] = "Missing from server — re-upload required"
         ft = Table(file_rows, repeatRows=1, colWidths=[90*mm, 18*mm, 25*mm, 40*mm])
         ft.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#dceef1")),("GRID",(0,0),(-1,-1),0.3,colors.grey),
                                 ("PADDING",(0,0),(-1,-1),5),("VALIGN",(0,0),(-1,-1),"TOP")]))
@@ -950,16 +1013,15 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
         if not analyses:
             if files:
                 empty_message = (
-                    "Files are attached to this study, but no analysis has been saved yet. "
-                    "Open Signal Review, choose each PDF, run Analyse, and wait for the "
-                    "saved confirmation. Then generate this report again."
+                    "Files are attached to this study, but no readable saved analysis is available. "
+                    "Check the file status above. If a raw EDF/BDF is listed as missing, re-upload it; "
+                    "if the format was rejected, inspect the server error before relying on this report."
                 )
             else:
                 empty_message = (
-                    "No files are attached to this study, so no PDF text or EEG report wording "
-                    "could be reviewed. Open the Uploads section and upload the EEG report while "
-                    "this study is selected. If the file was uploaded earlier, use Attach unassigned "
-                    "files. Then open Signal Review, run Analyse on the PDF, and generate this report again."
+                    "No files are attached to this study. Before generating a useful EEG report, "
+                    "select the correct study and attach the intended upload from the Uploads section. "
+                    "The report action can then run the available bounded EDF/BDF technical screening."
                 )
             story.append(Paragraph(empty_message, styles["BodyText"]))
         for a in analyses:
@@ -1014,6 +1076,65 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                     story.append(Paragraph("<br/>".join(xml_escape(x) for x in candidate_lines), styles["BodyText"]))
                 story.append(Paragraph(xml_escape(str(signal_review.get("interpretation", ""))), styles["Italic"]))
                 story.append(Paragraph(xml_escape(str(signal_review.get("coverage_note", ""))), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(str(signal_review.get("thresholds_note", ""))), styles["BodyText"]))
+
+                # Add per-channel relative band-power values to make the screening evidence inspectable.
+                band_definitions = [
+                    ("Delta 0.5–4 Hz", "delta_0_4_hz"),
+                    ("Theta 4–8 Hz", "theta_4_8_hz"),
+                    ("Alpha 8–13 Hz", "alpha_8_13_hz"),
+                    ("Beta 13–30 Hz", "beta_13_30_hz"),
+                    ("Low gamma 30–45 Hz", "low_gamma_30_45_hz"),
+                ]
+                band_rows = [["Channel"] + [item[0] for item in band_definitions]]
+                for channel in signal_review.get("channels", [])[:32]:
+                    if not channel.get("usable"):
+                        continue
+                    relative = channel.get("relative_band_power_pct") or {}
+                    band_rows.append(
+                        [str(channel.get("channel", ""))]
+                        + [("—" if relative.get(key) is None else f"{float(relative[key]):.1f}%")
+                           for _, key in band_definitions]
+                    )
+                if len(band_rows) > 1:
+                    story.append(Paragraph("Relative spectral power by channel (descriptive)", styles["Heading4"]))
+                    band_table = Table(band_rows, repeatRows=1,
+                                       colWidths=[22*mm, 30*mm, 30*mm, 30*mm, 30*mm, 30*mm])
+                    band_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dceef1")),
+                        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                        ("PADDING", (0, 0), (-1, -1), 3),
+                        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]))
+                    story.append(band_table)
+
+                # The application does not score these clinical EEG criteria; they remain for specialist review.
+                story.append(Paragraph("Clinical EEG review checklist — not automatically assessed", styles["Heading4"]))
+                review_items = [
+                    "Background organization and posterior dominant rhythm",
+                    "Background frequency, amplitude, continuity and reactivity",
+                    "Interhemispheric symmetry and synchrony",
+                    "Focal or diffuse slowing and its clinical correlation",
+                    "Sleep architecture and normal sleep transients, if recorded",
+                    "Epileptiform discharges and electrographic seizures",
+                    "Activation procedures (hyperventilation / photic stimulation), if performed",
+                    "Movement, muscle, electrode and ECG artefacts",
+                    "Event markers and clinical video / symptom correlation",
+                ]
+                story.append(Paragraph("<br/>".join("□ " + xml_escape(item) for item in review_items), styles["BodyText"]))
+                story.append(Paragraph(
+                    "<b>Automated impression:</b> No validated normal/abnormal EEG classification, "
+                    "epileptiform-discharge diagnosis, or seizure diagnosis is generated by this software. "
+                    "The descriptive findings above require review of the complete original recording by a qualified specialist.",
+                    styles["BodyText"],
+                ))
+                annotations = summ.get("annotations") or []
+                story.append(Paragraph(
+                    f"EDF/BDF annotation markers available in file metadata: {len(annotations)}. "
+                    "Annotation markers are acquisition metadata and are not, by themselves, verified clinical events.",
+                    styles["BodyText"],
+                ))
             wording_review = summ.get("report_wording_review")
             if wording_review:
                 from xml.sax.saxutils import escape as xml_escape
@@ -1032,7 +1153,7 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
         if s.get("source_text"):
             story += [Paragraph("Source report text supplied", styles["Heading2"]), Paragraph(str(s["source_text"])[:6000].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"), styles["BodyText"])]
         story += [Spacer(1, 12), Paragraph("IMPORTANT CLINICAL SAFETY & DATA LIMITATIONS", styles["Heading2"]),
-                  Paragraph("This document is an automated technical summary generated from uploaded files and user-supplied study metadata. It is NOT a clinical EEG report, diagnosis, seizure-exclusion statement, treatment recommendation, or validated medical-device output. The software does not read unrestricted thoughts or establish clinical abnormalities. Original complete EEG, acquisition settings, clinical history and artifacts must be reviewed by a qualified neurologist/neurophysiologist. Incomplete screenshots or selected pages cannot exclude events outside the supplied material.", styles["BodyText"]),
+                  Paragraph("This is a comprehensive technical research summary and clinician-review worksheet, NOT a final clinical EEG interpretation, diagnosis, seizure-exclusion statement, treatment recommendation, or validated medical-device output. Automated quantitative processing is currently limited to the initial bounded analysis window (up to 120 seconds) and descriptive signal-quality / band-power features. Generic transient candidates are not epileptiform discharges. The application does not determine background normality, posterior dominant rhythm, focal dysfunction, epileptiform activity, or seizures. A qualified neurologist/neurophysiologist must review the complete original recording, montage, filters, sensitivity, state, activation procedures, artifacts and clinical history before documenting a clinical impression.", styles["BodyText"]),
                   Spacer(1, 8), Paragraph("Generated by NeuroBridge v3.0 · " + now_iso(), styles["Italic"])]
         if selected_pages:
             import fitz
