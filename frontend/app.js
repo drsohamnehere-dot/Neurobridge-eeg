@@ -44,6 +44,7 @@ function fillSelects(){
  const oldAnalysis=$('analysisFile').value,oldPdf=$('pdfFile').value,oldPrediction=$('predictionFile').value,oldEdf=$('edfAnalysisFile')?.value||'';
  const edfFiles=files.filter(f=>['.edf','.bdf'].includes(extensionOf(f)));
  const otherFiles=files.filter(f=>!['.edf','.bdf'].includes(extensionOf(f)));
+ const edfListStatus=$('edfFileListStatus');if(edfListStatus)edfListStatus.textContent=edfFiles.length?`${edfFiles.length} EDF/BDF recording${edfFiles.length===1?'':'s'} found on the server.`:'No EDF/BDF recordings found on the server yet. Upload one here or from Waveforms, then tap Refresh file list.';
  $('analysisFile').innerHTML='<option value="">Select a file…</option>'+otherFiles.map(f=>`<option value="${f.id}">${esc(f.original_name)} (${fmtBytes(f.size_bytes)})</option>`).join('');
  $('edfAnalysisFile').innerHTML='<option value="">Select an EDF/BDF recording…</option>'+edfFiles.map(f=>`<option value="${f.id}">${esc(f.original_name)} · ${fmtBytes(f.size_bytes)}</option>`).join('');
  $('pdfFile').innerHTML='<option value="">Select PDF…</option>'+files.filter(f=>extensionOf(f)==='.pdf').map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');
@@ -273,6 +274,7 @@ $('edfDirectFileInput').addEventListener('change',async e=>{
  $('edfUploadStatus').textContent='Uploading '+file.name+' ('+fmtBytes(file.size)+')… Keep this page open until upload finishes.';
  try{
   await uploadFiles([file]);
+  await refreshEdfFileSelect();
   const uploaded=files.find(f=>f.original_name===file.name&&['.edf','.bdf'].includes(extensionOf(f)));
   if(uploaded){
    $('edfAnalysisFile').value=uploaded.id;
@@ -286,6 +288,8 @@ $('edfDirectFileInput').addEventListener('change',async e=>{
   toast(err?.message||'EDF upload failed');
  }finally{e.target.value='';}
 });
+$('edfChooseFileBtn').addEventListener('click',()=> $('edfDirectFileInput').click());
+$('refreshEdfFilesBtn').addEventListener('click',async()=>{const b=$('refreshEdfFilesBtn');b.disabled=true;try{const count=await refreshEdfFileSelect();toast(count?`${count} EDF/BDF recording(s) found`:'No EDF/BDF recordings found');}catch(e){$('edfFileListStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;toast(e.message);}finally{b.disabled=false;}});
 $('analyseEdfBtn').addEventListener('click',runEdfAnalysis);
 $('loadEdfWaveform').addEventListener('click',loadEdfWaveform);
 
