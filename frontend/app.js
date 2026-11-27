@@ -168,6 +168,7 @@ async function uploadFiles(list){
     toast(ok+' file(s) saved to backend');
   }
 }
+$('eegFileInput').addEventListener('change',async e=>{const selected=Array.from(e.target.files||[]);if(!selected.length){setUploadDiagnostic('No EEG file was selected. Tap Choose EDF/BDF and select an .edf or .bdf recording.','warning');return;}const bad=selected.filter(f=>!(/\.(edf|bdf)$/i.test(f.name)));if(bad.length){setUploadDiagnostic('The EEG picker accepts EDF/BDF recordings only: '+bad.map(f=>f.name).join(', '),'error');e.target.value='';return;}setUploadDiagnostic('Selected EEG recording: '+selected.map(f=>f.name).join(', '),'info');try{await uploadFiles(selected);}catch(err){setUploadDiagnostic('EEG upload did not start: '+(err?.message||String(err)),'error');toast(err?.message||'EEG upload failed');}finally{e.target.value='';}});
 $('fileInput').addEventListener('change',async e=>{
   const selected=Array.from(e.target.files||[]);
   if(!selected.length){setUploadDiagnostic('No file was selected.','warning');return;}
