@@ -490,16 +490,22 @@ def analyse_edf(path: Path) -> dict[str, Any]:
     raw = None
     try:
         import mne
-        from server.eeg_signal_review import build_signal_review
+        from server.eeg_signal_review import build_signal_review, scalp_eeg_channel_indices
 
         raw = mne.io.read_raw(path, preload=False, verbose="ERROR")
         sf = float(raw.info["sfreq"])
         n = int(raw.n_times)
         if not np.isfinite(sf) or sf <= 0 or n <= 0:
             raise ValueError("The recording has invalid sampling metadata or no samples.")
-        picks = mne.pick_types(raw.info, eeg=True, exclude=[])
+        picks = scalp_eeg_channel_indices(raw.ch_names)
+        selection_note = "Scalp EEG channels identified from standard 10-20/10-10 electrode labels."
+        if not picks:
+            picks = [i for i, kind in enumerate(raw.get_channel_types()) if kind == "eeg"]
+            selection_note = "No standard scalp electrode labels were recognised; EDF EEG channel types used as fallback. Verify channel selection manually."
         names = [raw.ch_names[i] for i in picks]
         duration = n / sf
+        selected_set = set(picks)
+        auxiliary_names = [name for i, name in enumerate(raw.ch_names) if i not in selected_set]
         summary = {
             "kind": "edf_bdf",
             "sampling_rate_hz": sf,
@@ -507,19 +513,22 @@ def analyse_edf(path: Path) -> dict[str, Any]:
             "sample_count": n,
             "channel_count": len(raw.ch_names),
             "eeg_channel_count": len(names),
+            "auxiliary_channel_count": len(auxiliary_names),
             "channel_names": raw.ch_names,
             "eeg_channels": names,
+            "auxiliary_channels": auxiliary_names,
+            "channel_selection_note": selection_note,
             "annotations": [
                 {"onset": float(a["onset"]), "duration": float(a["duration"]), "description": str(a["description"])}
                 for a in raw.annotations[:500]
             ],
             "limitations": [
-                "Signal features describe only the bounded initial analysis window, not necessarily the full recording.",
+                "Quantitative features currently cover the initial 120-second analysis window, not the complete recording.",
                 "Transient candidates are heuristic review prompts, not epileptiform-discharge or seizure detections.",
                 "No validated clinical EEG classifier is included; expert review of the raw EEG is required.",
             ],
         }
-        if len(picks) and n:
+        if picks and n:
             selected_picks = picks[:min(32, len(picks))]
             window_seconds = min(120.0, duration)
             stop = min(n, max(1, int(round(sf * window_seconds))))
@@ -536,12 +545,74 @@ def analyse_edf(path: Path) -> dict[str, Any]:
         else:
             summary["signal_review"] = {
                 "status": "not_available",
-                "interpretation": "No EEG channels were identified in this file.",
+                "interpretation": "No scalp EEG channels were identified in this file.",
                 "channels_processed": 0,
             }
         return summary
     except Exception as e:
         raise ValueError(f"EDF/BDF reader failed: {e}")
+    finally:
+        if raw is not None:
+            raw.close()
+
+
+@app.get("/api/files/{file_id}/edf-preview")
+def edf_waveform_preview(
+    file_id: str,
+    start_seconds: float = 0.0,
+    duration_seconds: float = 10.0,
+    max_channels: int = 8,
+    _: None = Depends(require_auth),
+):
+    """Return a compact, downsampled waveform preview from a stored EDF/BDF."""
+    rec = get_file_record(file_id)
+    if rec["extension"] not in {".edf", ".bdf"}:
+        raise HTTPException(415, "Waveform preview is available only for EDF/BDF recordings.")
+    raw = None
+    try:
+        import mne
+        from scipy.signal import resample
+        from server.eeg_signal_review import scalp_eeg_channel_indices
+
+        raw = mne.io.read_raw(rec["path"], preload=False, verbose="ERROR")
+        sf = float(raw.info["sfreq"])
+        total_seconds = float(raw.n_times / sf)
+        if not np.isfinite(sf) or sf <= 0 or raw.n_times <= 0:
+            raise ValueError("The recording has invalid sampling metadata.")
+        picks = scalp_eeg_channel_indices(raw.ch_names)
+        if not picks:
+            picks = [i for i, kind in enumerate(raw.get_channel_types()) if kind == "eeg"]
+        if not picks:
+            raise HTTPException(422, "No EEG channels could be identified in this EDF/BDF file.")
+        duration = min(15.0, max(2.0, float(duration_seconds)))
+        start = min(max(0.0, float(start_seconds)), max(0.0, total_seconds - duration))
+        stop = min(raw.n_times, max(1, int(round((start + duration) * sf))))
+        first = min(raw.n_times - 1, int(round(start * sf)))
+        selected = picks[:max(1, min(12, int(max_channels)))]
+        names = [raw.ch_names[i] for i in selected]
+        data = raw.get_data(picks=selected, start=first, stop=stop, reject_by_annotation=None) * 1_000_000.0
+        target_sfreq = min(64.0, sf)
+        target_count = max(2, int(round(data.shape[1] * target_sfreq / sf)))
+        preview = resample(data, target_count, axis=1)
+        times = start + (np.arange(preview.shape[1], dtype=float) / target_sfreq)
+        return {
+            "kind": "edf_waveform_preview",
+            "start_seconds": round(start, 3),
+            "duration_seconds": round(float(preview.shape[1] / target_sfreq), 3),
+            "recording_duration_seconds": round(total_seconds, 3),
+            "source_sampling_rate_hz": sf,
+            "preview_sampling_rate_hz": target_sfreq,
+            "channels": [
+                {"name": name, "values_uv": np.round(preview[index], 2).tolist()}
+                for index, name in enumerate(names)
+            ],
+            "time_seconds": np.round(times, 3).tolist(),
+            "note": "Downsampled visual preview only; use the original EDF/BDF for detailed review.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(422, f"Unable to create EDF/BDF waveform preview: {e}")
     finally:
         if raw is not None:
             raw.close()
