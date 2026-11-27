@@ -976,6 +976,11 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
             (study_id,),
         ).fetchall()
         selected_pages = con.execute("SELECT p.file_id,p.page_num,f.original_name,f.stored_name,f.extension FROM study_pages p JOIN files f ON f.id=p.file_id WHERE p.study_id=? ORDER BY f.original_name,p.page_num", (study_id,)).fetchall()
+    if not files:
+        raise HTTPException(
+            400,
+            "No files are attached to this study. Select the correct study, tick 'Attach unassigned uploads' on the report page, or upload the original EDF/BDF recording first.",
+        )
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
@@ -1045,6 +1050,15 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                     f"Generic transient candidates: {signal_review.get('transient_candidate_count', 0)}",
                 ]
                 story.append(Paragraph("<br/>".join(xml_escape(x) for x in overview), styles["BodyText"]))
+                if s.get("sampling_rate") and summ.get("sampling_rate_hz"):
+                    entered_rate = float(s["sampling_rate"])
+                    header_rate = float(summ["sampling_rate_hz"])
+                    if abs(entered_rate - header_rate) > max(0.05, header_rate * 0.005):
+                        story.append(Paragraph(
+                            f"<b>Acquisition metadata check:</b> study form says {entered_rate:g} Hz, "
+                            f"but the EDF/BDF header reports {header_rate:g} Hz. Use the original device/export settings to resolve this discrepancy.",
+                            styles["BodyText"],
+                        ))
                 channel_rows = [["Channel", "RMS (µV)", "Peak-to-peak (µV)", "Dominant Hz", "Quality flags"]]
                 for channel in signal_review.get("channels", [])[:32]:
                     if not channel.get("usable"):
