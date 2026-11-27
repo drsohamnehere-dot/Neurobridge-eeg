@@ -263,7 +263,7 @@ async function runEdfAnalysis(){
 $('edfDirectFileInput').addEventListener('change',async e=>{
  const selected=Array.from(e.target.files||[]);
  if(!selected.length){$('edfUploadStatus').textContent='No file selected. Tap Choose EDF/BDF file and select a recording from Files.';return;}
- const invalid=selected.filter(f=>!(/\\.(edf|bdf)$/i.test(f.name)));
+ const invalid=selected.filter(f=>!(/\.(edf|bdf)$/i.test(f.name)));
  if(invalid.length){$('edfUploadStatus').textContent='Unsupported file. Please choose an .edf or .bdf recording.';toast('Please select an EDF or BDF file.');e.target.value='';return;}
  const file=selected[0];
  if(file.size>500*1024*1024){$('edfUploadStatus').textContent='This file is larger than the 500 MB upload limit.';toast('File exceeds 500 MB.');e.target.value='';return;}
