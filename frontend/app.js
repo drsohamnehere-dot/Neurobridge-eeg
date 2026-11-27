@@ -301,7 +301,33 @@ $('saveSelectedPages').addEventListener('click',async()=>{if(!currentStudyId){to
 $('trainBtn').addEventListener('click',async()=>{const b=$('trainBtn');b.disabled=true;$('modelStatus').textContent='Building labelled trial features and fitting baseline SVM…';try{const r=await api('/ml/train',{method:'POST'});$('modelStatus').textContent=`Model trained · balanced accuracy ${(r.metrics.balanced_accuracy*100).toFixed(1)}% · ${r.metrics.trials_total} trials. See validation warning below.`;await refreshModels();toast('Research baseline model saved');}catch(e){$('modelStatus').textContent=e.message;}finally{b.disabled=false;}});
 async function refreshModels(){try{const data=await api('/ml/models');const area=$('modelsList');const oldModel=$('predictionModel').value;$('predictionModel').innerHTML='<option value="">Select a saved model…</option>'+data.models.map(m=>`<option value="${m.id}">${m.id.slice(0,8)} · ${m.classes.join('/')}${m.stale?' · STALE':''}</option>`).join('');if(data.models.some(m=>m.id===oldModel))$('predictionModel').value=oldModel;if(!data.models.length){area.innerHTML='<div class="empty">No saved models yet. Upload labelled CSV/TSV trials and train a baseline.</div>';return;}area.innerHTML=data.models.map(m=>`<div class="model-item"><div><strong>Research baseline · ${m.id.slice(0,8)}</strong><p>${fmtDate(m.created_at)} · classes: ${m.classes.map(esc).join(', ')}</p><p class="${m.stale?'stale':''}">${m.stale?'Dataset changed — model is stale; retrain to include new CSV/TSV data.':'Model matches current dataset revision.'}</p></div><div class="model-metric">Balanced accuracy ${(m.metrics.balanced_accuracy*100).toFixed(1)}%<div class="small muted">Test set: ${m.metrics.trials_test} trials</div></div></div>`).join('');}catch(e){console.warn(e);}}
 $('predictBtn').addEventListener('click',async()=>{const mid=$('predictionModel').value,fid=$('predictionFile').value;if(!mid||!fid){$('predictionStatus').textContent='Select a saved model and an input file.';return;}const b=$('predictBtn');b.disabled=true;$('predictionStatus').textContent='Running trial-level predictions…';$('predictionOutput').textContent='';try{const r=await api(`/ml/predict/${mid}/${fid}`,{method:'POST'});$('predictionStatus').textContent=`Predicted ${r.predictions.length} trial(s).`;$('predictionOutput').textContent=r.predictions.map(p=>`${p.trial_id} → ${p.predicted_task_label} · ${Object.entries(p.probabilities).map(([k,v])=>`${k} ${(v*100).toFixed(1)}%`).join(' | ')}`).join('\n')+'\n\n'+r.warning;}catch(e){$('predictionStatus').textContent=e.message;}finally{b.disabled=false;}});
-$('generateReport').addEventListener('click',async()=>{if(!currentStudyId){toast('Save study details first.');showTab('details');return;}const b=$('generateReport');b.disabled=true;$('reportStatus').textContent='Generating PDF from saved backend records…';try{const res=await fetch(API+`/studies/${currentStudyId}/report.pdf`,{headers:authHeaders()});if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||'Could not generate report');}const blob=await res.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`NeuroBridge_${currentStudyId.slice(0,8)}_technical_draft.pdf`;a.click();URL.revokeObjectURL(a.href);$('reportStatus').textContent='PDF generated.';toast('Technical review PDF created');}catch(e){$('reportStatus').textContent=e.message;}finally{b.disabled=false;}});
-$('refreshBtn').addEventListener('click',()=>refreshAll().then(()=>toast('Server data refreshed')));$('reloadFiles').addEventListener('click',()=>refreshFiles());$('attachUnassigned').addEventListener('click',async()=>{if(!currentStudyId){toast('Save or select a study first, then attach the files.');showTab('details');return;}const b=$('attachUnassigned');b.disabled=true;try{const r=await api(`/studies/${currentStudyId}/attach-unassigned`,{method:'POST'});await refreshAll();toast(r.attached?`${r.attached} unassigned file(s) attached to this study`:'No unassigned files found.');}catch(e){toast(e.message);}finally{b.disabled=false;}});$('logoutBtn').addEventListener('click',logout);$('loginBtn').addEventListener('click',login);$('accessCode').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+$('generateReport').addEventListener('click',async()=>{
+ if(!currentStudyId){toast('Save or open the correct study first.');showTab('details');return;}
+ const b=$('generateReport');b.disabled=true;
+ try{
+  await refreshFiles();
+  const attachChoice=$('attachUnassignedForReport');
+  const unassigned=files.filter(f=>!f.study_id);
+  if(attachChoice?.checked&&unassigned.length){
+   $('reportStatus').textContent='Attaching '+unassigned.length+' unassigned upload(s) to the selected study…';
+   const linked=await api(`/studies/${currentStudyId}/attach-unassigned`,{method:'POST'});
+   $('reportStatus').textContent=linked.attached+' file(s) attached. Preparing any EDF/BDF recordings and building the report…';
+   await refreshFiles();
+  }else{
+   $('reportStatus').textContent='Preparing attached recordings and building the comprehensive report…';
+  }
+  const res=await fetch(API+`/studies/${currentStudyId}/report.pdf`,{headers:authHeaders()});
+  if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.detail||'Could not generate report');}
+  const blob=await res.blob();const url=URL.createObjectURL(blob);const link=document.createElement('a');
+  link.href=url;link.download=`NeuroBridge_${currentStudyId.slice(0,8)}_EEG_review.pdf`;link.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  $('reportStatus').textContent='Comprehensive technical report generated. Check the file-status and clinical-review sections in the PDF.';
+  toast('EEG review PDF generated');
+ }catch(e){$('reportStatus').textContent='Report generation failed: '+e.message;toast(e.message);}
+ finally{b.disabled=false;}
+});
+$('refreshBtn').addEventListener('click',()=>refreshAll().then(()=>toast('Server data refreshed')));$('reloadFiles').addEventListener('click',()=>refreshFiles());async function attachUnassignedToActiveStudy(button){if(!currentStudyId){toast('Save or open a study first.');showTab('details');return;}button.disabled=true;try{const r=await api(`/studies/${currentStudyId}/attach-unassigned`,{method:'POST'});await refreshAll();toast(r.attached?`${r.attached} unassigned file(s) attached to this study`:'No unassigned files found.');}catch(e){toast(e.message);}finally{button.disabled=false;}}
+$('attachUnassigned').addEventListener('click',()=>attachUnassignedToActiveStudy($('attachUnassigned')));
+if($('attachUnassignedFromDetails'))$('attachUnassignedFromDetails').addEventListener('click',()=>attachUnassignedToActiveStudy($('attachUnassignedFromDetails')));$('logoutBtn').addEventListener('click',logout);$('loginBtn').addEventListener('click',login);$('accessCode').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
 if(token){$('authModal').classList.add('hidden');refreshAll().catch(()=>logout());}else{$('authModal').classList.remove('hidden');checkServer();}
 setInterval(()=>{if(token){refreshStats();refreshFiles();refreshModels();}},15000);

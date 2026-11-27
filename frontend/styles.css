@@ -25,3 +25,9 @@
 .edf-file-picker-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0;}
 .edf-file-picker-row label{margin:0!important;}
 #edfFileListStatus{margin:8px 0 12px;}
+
+
+.report-attach-option{background:#0a1b2b;border:1px solid #29465e;border-radius:11px;padding:13px 15px;margin:14px 0}
+.report-attach-option label{display:flex;align-items:flex-start;gap:9px;color:#d9e8f2;font-size:12px;font-weight:700}
+.report-attach-option input{width:auto;min-width:16px;margin:1px 0 0;accent-color:#59d3db}
+.report-attach-option p{margin:7px 0 0 25px;line-height:1.5}
