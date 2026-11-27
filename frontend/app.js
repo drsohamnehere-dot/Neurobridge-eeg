@@ -28,15 +28,154 @@ function renderFiles(){const body=$('filesTable');if(!files.length){body.innerHT
 function fillSelects(){const oldAnalysis=$('analysisFile').value,oldPdf=$('pdfFile').value,oldPrediction=$('predictionFile').value;const options=files.map(f=>`<option value="${f.id}">${esc(f.original_name)} (${fmtBytes(f.size_bytes)})</option>`).join('');$('analysisFile').innerHTML='<option value="">Select a file…</option>'+options;$('pdfFile').innerHTML='<option value="">Select PDF…</option>'+files.filter(f=>f.extension==='.pdf').map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');$('predictionFile').innerHTML='<option value="">Select CSV/TSV…</option>'+files.filter(f=>['.csv','.tsv','.txt'].includes(f.extension)).map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');if(files.some(f=>f.id===oldAnalysis))$('analysisFile').value=oldAnalysis;if(files.some(f=>f.id===oldPdf&&f.extension==='.pdf'))$('pdfFile').value=oldPdf;if(files.some(f=>f.id===oldPrediction&&['.csv','.tsv','.txt'].includes(f.extension)))$('predictionFile').value=oldPrediction;}
 async function renderImageUploads(){const area=$('imageSelectionGrid');const imgs=files.filter(f=>['.png','.jpg','.jpeg','.webp'].includes(f.extension));if(!imgs.length){area.innerHTML='<div class="empty">Uploaded PNG/JPG/WEBP images will appear here.</div>';return;}area.innerHTML='';for(const f of imgs){const card=document.createElement('div');card.className='image-select-card';const chosen=pageSelections.get(f.id)?.has(0)||false;card.innerHTML=`<img alt="${esc(f.original_name)}" src=""><div class="img-name">${esc(f.original_name)}</div><label><input type="checkbox" ${chosen?'checked':''}> Include in reviewer PDF</label>`;area.appendChild(card);const img=card.querySelector('img');if(imagePreviewCache.has(f.id)){img.src=imagePreviewCache.get(f.id);}else{const resp=await fetch(API+`/files/${f.id}/download`,{headers:authHeaders()});if(resp.ok){const url=URL.createObjectURL(await resp.blob());imagePreviewCache.set(f.id,url);img.src=url;}}const check=card.querySelector('input');check.addEventListener('change',e=>{if(!pageSelections.has(f.id))pageSelections.set(f.id,new Set());const set=pageSelections.get(f.id);if(e.target.checked){if(totalSelectedPages()>=8){e.target.checked=false;toast('Maximum 8 pages/images per study.');return;}set.add(0);}else set.delete(0);updateSelectedPageCount();});}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function uploadOne(file, index, total, batchState){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();const fd=new FormData();fd.append('file',file,file.name);if(currentStudyId)fd.append('study_id',currentStudyId);const id='q'+index;const queue=$('uploadQueue');const card=document.createElement('div');card.className='queue-item';card.innerHTML=`<div><div class="queue-name">${esc(file.name)} · ${fmtBytes(file.size)}</div><div class="mini-progress"><i id="${id}bar"></i></div></div><div class="queue-state" id="${id}state">Queued</div>`;queue.appendChild(card);let lastLoaded=0,lastTime=Date.now(),speed=0;
-  xhr.upload.addEventListener('progress',e=>{if(!e.lengthComputable)return;const pct=Math.min(100,Math.round(e.loaded/e.total*100));const fileLoaded=Math.min(file.size,Math.round((e.loaded/e.total)*file.size));$(id+'bar').style.width=pct+'%';$(id+'state').textContent=pct+'%';const now=Date.now();if(now-lastTime>=400){speed=(fileLoaded-lastLoaded)/((now-lastTime)/1000);lastLoaded=fileLoaded;lastTime=now;}batchState.loadedBefore[index]=fileLoaded;const loaded=batchState.loadedBefore.reduce((a,b)=>a+b,0);const overall=Math.min(100,Math.round(loaded/batchState.total*100));$('batchPercent').textContent=overall+'%';$('batchBar').style.width=overall+'%';$('batchBytes').textContent=fmtBytes(loaded)+' / '+fmtBytes(batchState.total);const eta=speed>0?(file.size-fileLoaded)/speed:null;$('batchEta').textContent=eta!==null?`Current file: ${fmtBytes(speed)}/s · ~${Math.ceil(eta)}s remaining`:'Transferring…';$('batchTitle').textContent=`Uploading ${index+1} of ${total}`;$('batchSub').textContent=`${file.name} · ${pct}% sent`;
+function setUploadDiagnostic(message,state='info'){
+  const el=$('uploadDiagnostic');
+  if(!el)return;
+  el.textContent=message;
+  el.dataset.state=state;
+}
+function uploadFailureMessage(xhr,data,fileName){
+  const detail=typeof data?.detail==='string'?data.detail:'';
+  if(xhr.status===401){logout();return 'Your session expired. Sign in again, then retry the upload.';}
+  if(xhr.status===413)return 'The server rejected this file because it is larger than its upload limit.';
+  if(xhr.status===415)return detail||'This file type is not accepted by the server. Choose an EDF or BDF file.';
+  if(xhr.status===422)return detail||'The server could not read the uploaded form. Please retry once.';
+  if(xhr.status===502||xhr.status===503||xhr.status===504)return 'The hosting service is waking up or temporarily unavailable. Wait for the site to reconnect, then retry.';
+  if(xhr.status===0)return 'The browser could not reach NeuroBridge. Check your internet connection and reload the page.';
+  return detail||('Upload failed for '+fileName+' (HTTP '+xhr.status+').');
+}
+function uploadOne(file,index,total,batchState){
+  return new Promise((resolve,reject)=>{
+    if(!token){logout();reject(new Error('Please sign in before uploading.'));return;}
+    const xhr=new XMLHttpRequest();
+    const fd=new FormData();
+    fd.append('file',file,file.name);
+    if(currentStudyId)fd.append('study_id',currentStudyId);
+    const id='q'+index;
+    const queue=$('uploadQueue');
+    const card=document.createElement('div');
+    card.className='queue-item';
+    card.innerHTML='<div><div class="queue-name">'+esc(file.name)+' · '+fmtBytes(file.size)+'</div><div class="mini-progress"><i id="'+id+'bar"></i></div></div><div class="queue-state" id="'+id+'state">Queued</div>';
+    queue.appendChild(card);
+    let lastLoaded=0,lastTime=Date.now(),speed=0;
+    const stateEl=$(id+'state');
+    const fail=(message)=>{
+      stateEl.textContent='Failed: '+message;
+      stateEl.style.color='var(--red)';
+      card.title=message;
+      setUploadDiagnostic(message,'error');
+      reject(new Error(message));
+    };
+    xhr.timeout=600000;
+    xhr.upload.addEventListener('loadstart',()=>{
+      stateEl.textContent='Connecting…';
+      setUploadDiagnostic('Connecting to the NeuroBridge upload endpoint…','info');
+    });
+    xhr.upload.addEventListener('progress',e=>{
+      if(!e.lengthComputable)return;
+      const pct=Math.min(100,Math.round(e.loaded/e.total*100));
+      const fileLoaded=Math.min(file.size,Math.round((e.loaded/e.total)*file.size));
+      $(id+'bar').style.width=pct+'%';
+      stateEl.textContent=pct+'%';
+      const now=Date.now();
+      if(now-lastTime>=400){speed=(fileLoaded-lastLoaded)/((now-lastTime)/1000);lastLoaded=fileLoaded;lastTime=now;}
+      batchState.loadedBefore[index]=fileLoaded;
+      const loaded=batchState.loadedBefore.reduce((a,b)=>a+b,0);
+      const overall=Math.min(100,Math.round(loaded/batchState.total*100));
+      $('batchPercent').textContent=overall+'%';
+      $('batchBar').style.width=overall+'%';
+      $('batchBytes').textContent=fmtBytes(loaded)+' / '+fmtBytes(batchState.total);
+      const eta=speed>0?(file.size-fileLoaded)/speed:null;
+      $('batchEta').textContent=eta!==null?'Current file: '+fmtBytes(speed)+'/s · ~'+Math.ceil(eta)+'s remaining':'Transferring…';
+      $('batchTitle').textContent='Uploading '+(index+1)+' of '+total;
+      $('batchSub').textContent=file.name+' · '+pct+'% sent';
+      setUploadDiagnostic('Uploading '+file.name+' · '+pct+'%','info');
+    });
+    xhr.upload.addEventListener('load',()=>{
+      batchState.loadedBefore[index]=file.size;
+      stateEl.textContent='Verifying…';
+      const loaded=batchState.loadedBefore.reduce((a,b)=>a+b,0);
+      $('batchBytes').textContent=fmtBytes(loaded)+' / '+fmtBytes(batchState.total);
+      $('batchSub').textContent='Upload sent; server is verifying and storing the file…';
+      setUploadDiagnostic('File sent. Waiting for server confirmation…','info');
+    });
+    xhr.addEventListener('load',()=>{
+      let data={};
+      try{data=JSON.parse(xhr.responseText||'{}');}catch{}
+      if(xhr.status>=200&&xhr.status<300){
+        $(id+'bar').style.width='100%';
+        stateEl.textContent='Saved';
+        stateEl.style.color='var(--green)';
+        batchState.loadedBefore[index]=file.size;
+        card.title='Stored successfully on the NeuroBridge server';
+        setUploadDiagnostic(file.name+' was accepted and saved by the server.','success');
+        resolve(data);
+      }else{
+        fail(uploadFailureMessage(xhr,data,file.name));
+      }
+    });
+    xhr.addEventListener('error',()=>fail('Network error: the browser could not complete the upload request.'));
+    xhr.addEventListener('timeout',()=>fail('Upload timed out after 10 minutes. Check the connection and retry.'));
+    xhr.addEventListener('abort',()=>fail('Upload was cancelled.'));
+    xhr.open('POST',API+'/files');
+    xhr.setRequestHeader('Authorization','Bearer '+token);
+    xhr.setRequestHeader('Accept','application/json');
+    xhr.send(fd);
+    setUploadDiagnostic('Upload request started for '+file.name+'.','info');
   });
-  xhr.upload.addEventListener('load',()=>{batchState.loadedBefore[index]=file.size;$(id+'state').textContent='Saving…';const loaded=batchState.loadedBefore.reduce((a,b)=>a+b,0);$('batchBytes').textContent=fmtBytes(loaded)+' / '+fmtBytes(batchState.total);$('batchSub').textContent='Upload sent; backend is verifying and storing the file…';});
-  xhr.addEventListener('load',()=>{let data={};try{data=JSON.parse(xhr.responseText);}catch{}if(xhr.status>=200&&xhr.status<300){$(id+'bar').style.width='100%';$(id+'state').textContent='Saved';batchState.loadedBefore[index]=file.size;resolve(data);}else{const msg=data.detail||`Upload failed (${xhr.status})`;$ (id+'state').textContent='Failed';card.querySelector('.queue-state').style.color='var(--red)';reject(new Error(msg));}});
-  xhr.addEventListener('error',()=>{ $(id+'state').textContent='Network error';reject(new Error('Network error while uploading '+file.name));});xhr.addEventListener('abort',()=>reject(new Error('Upload cancelled')));xhr.open('POST',API+'/files');xhr.setRequestHeader('Authorization','Bearer '+token);xhr.send(fd);
- });}
-async function uploadFiles(list){const valid=Array.from(list).filter(f=>/\.(edf|bdf|csv|tsv|txt|json|pdf|png|jpe?g|webp)$/i.test(f.name));if(!valid.length){toast('Choose a supported file type.');return;}const total=valid.reduce((a,f)=>a+f.size,0);$('uploadQueue').innerHTML='';$('batchProgress').classList.remove('hidden');$('batchTitle').textContent='Preparing uploads';$('batchSub').textContent=`${valid.length} file(s) · ${fmtBytes(total)} total`;$('batchPercent').textContent='0%';$('batchBar').style.width='0%';$('batchBytes').textContent=`0 B / ${fmtBytes(total)}`;const batch={total,loadedBefore:valid.map(()=>0)};let ok=0;for(let i=0;i<valid.length;i++){try{await uploadOne(valid[i],i,valid.length,batch);ok++;}catch(e){toast(e.message);}}$('batchTitle').textContent=`Upload batch finished · ${ok}/${valid.length} saved`;$('batchSub').textContent='Server records refreshed.';$('batchPercent').textContent=Math.round(batch.loadedBefore.reduce((a,b)=>a+b,0)/total*100)+'%';await refreshAll();toast(`${ok} file(s) saved to backend`);}
-$('fileInput').addEventListener('change',e=>{uploadFiles(e.target.files);e.target.value='';});
+}
+async function uploadFiles(list){
+  const selected=Array.from(list||[]);
+  if(!selected.length){setUploadDiagnostic('No file was selected. Tap Choose files and select the EDF file.','warning');return;}
+  if(!token){setUploadDiagnostic('Please sign in before uploading.','error');logout();return;}
+  const supported=/\.(edf|bdf|csv|tsv|txt|json|pdf|png|jpe?g|webp)$/i;
+  const invalid=selected.filter(f=>!supported.test(f.name));
+  if(invalid.length){setUploadDiagnostic('Unsupported file extension: '+invalid.map(f=>f.name).join(', '),'error');}
+  const tooLarge=selected.filter(f=>f.size>500*1024*1024);
+  if(tooLarge.length){setUploadDiagnostic('File exceeds 500 MB: '+tooLarge.map(f=>f.name).join(', '),'error');}
+  const empty=selected.filter(f=>!f.size);
+  if(empty.length){setUploadDiagnostic('Empty file selected: '+empty.map(f=>f.name).join(', '),'error');}
+  const valid=selected.filter(f=>supported.test(f.name)&&f.size>0&&f.size<=500*1024*1024);
+  if(!valid.length){toast('No usable files selected. Check the upload message below.');return;}
+  const total=valid.reduce((a,f)=>a+f.size,0);
+  $('uploadQueue').innerHTML='';
+  $('batchProgress').classList.remove('hidden');
+  $('batchTitle').textContent='Preparing uploads';
+  $('batchSub').textContent=valid.length+' file(s) · '+fmtBytes(total)+' total';
+  $('batchPercent').textContent='0%';
+  $('batchBar').style.width='0%';
+  $('batchBytes').textContent='0 B / '+fmtBytes(total);
+  const batch={total,loadedBefore:valid.map(()=>0)};
+  let ok=0;
+  const failures=[];
+  setUploadDiagnostic('Preparing '+valid.length+' file(s) for upload…','info');
+  for(let i=0;i<valid.length;i++){
+    try{await uploadOne(valid[i],i,valid.length,batch);ok++;}
+    catch(e){failures.push(valid[i].name+': '+e.message);toast(e.message);}
+  }
+  $('batchTitle').textContent='Upload batch finished · '+ok+'/'+valid.length+' saved';
+  $('batchSub').textContent=failures.length?'Some files were not saved. See the error beside the failed file.':'All files were accepted by the server.';
+  const loaded=batch.loadedBefore.reduce((a,b)=>a+b,0);
+  $('batchPercent').textContent=Math.round(loaded/total*100)+'%';
+  $('batchBar').style.width=Math.round(loaded/total*100)+'%';
+  try{await refreshAll();}
+  catch(e){setUploadDiagnostic('Upload finished, but the file list could not refresh: '+e.message,'error');}
+  if(failures.length){
+    setUploadDiagnostic(ok+' of '+valid.length+' file(s) saved. '+failures.join(' | '),'error');
+    toast(ok+' of '+valid.length+' file(s) saved; upload errors need attention.');
+  }else{
+    setUploadDiagnostic(ok+' file(s) uploaded and confirmed by the NeuroBridge server.','success');
+    toast(ok+' file(s) saved to backend');
+  }
+}
+$('fileInput').addEventListener('change',async e=>{
+  const selected=Array.from(e.target.files||[]);
+  if(!selected.length){setUploadDiagnostic('No file was selected.','warning');return;}
+  setUploadDiagnostic('Selected '+selected.length+' file(s): '+selected.map(f=>f.name).join(', '),'info');
+  try{await uploadFiles(selected);}
+  catch(err){setUploadDiagnostic('Upload did not start: '+(err?.message||String(err)),'error');toast(err?.message||'Upload failed');}
+  finally{e.target.value='';}
+});
 const dz=$('dropZone');['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('dragging');}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('dragging');}));dz.addEventListener('drop',e=>uploadFiles(e.dataTransfer.files));
 document.addEventListener('paste',e=>{const items=Array.from(e.clipboardData?.items||[]);const imgs=items.filter(i=>i.type.startsWith('image/')).map((i,n)=>i.getAsFile()).filter(Boolean).map((f,i)=>new File([f],`pasted-waveform-${Date.now()}-${i}.png`,{type:f.type||'image/png'}));if(imgs.length)uploadFiles(imgs);});$('pasteHint').addEventListener('click',()=>toast('Copy a waveform screenshot, then paste it anywhere on this page.'));
 async function downloadFile(id){try{const r=await fetch(API+`/files/${id}/download`,{headers:authHeaders()});if(!r.ok)throw new Error('Download failed');const blob=await r.blob();const f=files.find(x=>x.id===id);const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=f?.original_name||'eeg-file';a.click();URL.revokeObjectURL(a.href);}catch(e){toast(e.message);}}
