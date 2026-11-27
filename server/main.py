@@ -160,7 +160,14 @@ def require_auth(authorization: str | None = Header(default=None)) -> None:
 
 
 def row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    return dict(row) if row else None
+    if not row:
+        return None
+    result = dict(row)
+    # Normalise legacy records too: earlier uploads may have stored uppercase extensions.
+    if "extension" in result:
+        fallback = Path(result.get("original_name") or "").suffix
+        result["extension"] = str(result.get("extension") or fallback).lower()
+    return result
 
 
 def bump_dataset_revision() -> int:

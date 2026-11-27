@@ -20,3 +20,8 @@
 .edf-upload-hint{font-size:12px;color:var(--muted,#8293a5);margin-top:7px}
 .edf-upload-divider{height:1px;background:var(--line,#294054);margin:18px 0}
 #edfUploadStatus{min-height:22px;margin-top:8px;overflow-wrap:anywhere}
+
+.edf-choose-button{color:#071321!important;font-weight:800;cursor:pointer;}
+.edf-file-picker-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0;}
+.edf-file-picker-row label{margin:0!important;}
+#edfFileListStatus{margin:8px 0 12px;}

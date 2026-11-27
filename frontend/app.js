@@ -15,21 +15,23 @@ async function api(path, options={}) {
 function toast(message) { const el=$('toast'); el.textContent=message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),2600); }
 function fmtBytes(n) { if(n<1024)return `${n} B`; if(n<1048576)return `${(n/1024).toFixed(1)} KB`; if(n<1073741824)return `${(n/1048576).toFixed(2)} MB`; return `${(n/1073741824).toFixed(2)} GB`; }
 function fmtDate(s) { try{return new Date(s).toLocaleString();}catch{return s||'—';} }
+function extensionOf(file){const ext=String(file?.extension||'').trim().toLowerCase();if(ext)return ext.startsWith('.')?ext:'.'+ext;const match=String(file?.original_name||'').match(/\.[^.]+$/);return match?match[0].toLowerCase():'';}
 function logout(){token='';sessionStorage.removeItem('nb_token');$('authModal').classList.remove('hidden');$('loginStatus').textContent='Please sign in.';}
 async function login(){const code=$('accessCode').value;if(!code){$('loginStatus').textContent='Enter the access code.';return;} $('loginBtn').disabled=true;$('loginStatus').textContent='Checking access code…';try{const r=await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_code:code})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Login failed');token=d.token;sessionStorage.setItem('nb_token',token);$('authModal').classList.add('hidden');$('accessCode').value='';$('loginStatus').textContent='';await refreshAll();toast('Connected to NeuroBridge backend');}catch(e){$('loginStatus').textContent=e.message;}finally{$('loginBtn').disabled=false;}}
-function showTab(name){document.querySelectorAll('.step').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));document.querySelectorAll('.tab-panel').forEach(x=>x.classList.add('hidden'));$('tab-'+name).classList.remove('hidden');}
+function showTab(name){document.querySelectorAll('.step').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));document.querySelectorAll('.tab-panel').forEach(x=>x.classList.add('hidden'));$('tab-'+name).classList.remove('hidden');if(name==='edf'&&token){refreshEdfFileSelect().catch(e=>{$('edfFileListStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;});}}
 document.querySelectorAll('.step').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
 async function checkServer(){try{const r=await fetch(API+'/health');const d=await r.json();$('apiStatus').classList.add('online');$('apiStatus').innerHTML='<i></i> Backend online · v'+d.version;}catch{$('apiStatus').classList.remove('online');$('apiStatus').innerHTML='<i></i> Backend unavailable';}}
 async function refreshStats(){try{const s=await api('/stats');$('statFiles').textContent=s.files;$('statStudies').textContent=s.studies;$('statAnalyses').textContent=s.analyses;$('statStorage').textContent=fmtBytes(s.bytes_stored);}catch(e){console.warn(e);}}
 async function refreshStudies(){studies=await api('/studies');const sel=$('existingStudy');const previous=currentStudyId||sessionStorage.getItem('nb_study_id')||'';sel.innerHTML='<option value="">Create a new study…</option>'+studies.map(s=>`<option value="${s.id}">${esc(s.title)} · ${s.subject_code?esc(s.subject_code):s.id.slice(0,8)}</option>`).join('');if(previous&&studies.some(s=>s.id===previous)){currentStudyId=previous;sel.value=previous;}else if(!currentStudyId){sel.value='';}}
+async function refreshEdfFileSelect(){files=await api('/files');renderFiles();fillSelects();const count=files.filter(f=>['.edf','.bdf'].includes(extensionOf(f))).length;const status=$('edfFileListStatus');if(status)status.textContent=count?`${count} EDF/BDF recording${count===1?'':'s'} found on the server.`:'No EDF/BDF recordings found on the server yet. Upload one here or from Waveforms, then tap Refresh file list.';return count;}
 async function refreshFiles(){files=await api('/files');renderFiles();fillSelects();await renderImageUploads();}
 async function refreshAll(){await checkServer();await Promise.all([refreshStats(),refreshStudies(),refreshFiles(),refreshModels()]);if(currentStudyId){try{const s=await api('/studies/'+currentStudyId);$('studyTitle').value=s.title||'';$('subjectCode').value=s.subject_code||'';$('studyDate').value=s.study_date||'';$('studyAge').value=s.age??'';$('studySex').value=s.sex||'';$('studyMontage').value=s.montage||'';$('studyRate').value=s.sampling_rate??'';$('studyContext').value=s.context||'';$('studySource').value=s.source_text||'';$('studySaveStatus').textContent='Loaded saved study · '+currentStudyId.slice(0,8);await loadSavedPageSelections();}catch(e){console.warn(e);}}}
 function renderFiles(){
  const body=$('filesTable');
  if(!files.length){body.innerHTML='<tr><td colspan="6" class="empty">No uploads yet.</td></tr>';return;}
  body.innerHTML=files.map(f=>{
-  const isEdf=['.edf','.bdf'].includes(f.extension),label=isEdf?'EDF Analyse':'Analyse';
-  return `<tr><td><div class="file-name">${esc(f.original_name)}</div><div class="file-sub">${f.sha256.slice(0,12)}…</div></td><td>${esc(f.extension.toUpperCase())}</td><td>${fmtBytes(f.size_bytes)}</td><td>${fmtDate(f.uploaded_at)}</td><td><span class="status-tag ${f.status==='error'?'error':''}">${esc(f.status)}</span></td><td><div class="row-actions"><button class="tiny-btn" data-analyse="${f.id}">${label}</button><button class="tiny-btn" data-download="${f.id}">Save</button></div></td></tr>`;
+  const isEdf=['.edf','.bdf'].includes(extensionOf(f)),label=isEdf?'EDF Analyse':'Analyse';
+  return `<tr><td><div class="file-name">${esc(f.original_name)}</div><div class="file-sub">${f.sha256.slice(0,12)}…</div></td><td>${esc(extensionOf(f).toUpperCase())}</td><td>${fmtBytes(f.size_bytes)}</td><td>${fmtDate(f.uploaded_at)}</td><td><span class="status-tag ${f.status==='error'?'error':''}">${esc(f.status)}</span></td><td><div class="row-actions"><button class="tiny-btn" data-analyse="${f.id}">${label}</button><button class="tiny-btn" data-download="${f.id}">Save</button></div></td></tr>`;
  }).join('');
  body.querySelectorAll('[data-analyse]').forEach(b=>b.addEventListener('click',()=>{
   const file=files.find(f=>f.id===b.dataset.analyse);
@@ -40,19 +42,20 @@ function renderFiles(){
 }
 function fillSelects(){
  const oldAnalysis=$('analysisFile').value,oldPdf=$('pdfFile').value,oldPrediction=$('predictionFile').value,oldEdf=$('edfAnalysisFile')?.value||'';
- const edfFiles=files.filter(f=>['.edf','.bdf'].includes(f.extension));
- const otherFiles=files.filter(f=>!['.edf','.bdf'].includes(f.extension));
+ const edfFiles=files.filter(f=>['.edf','.bdf'].includes(extensionOf(f)));
+ const otherFiles=files.filter(f=>!['.edf','.bdf'].includes(extensionOf(f)));
+ const edfListStatus=$('edfFileListStatus');if(edfListStatus)edfListStatus.textContent=edfFiles.length?`${edfFiles.length} EDF/BDF recording${edfFiles.length===1?'':'s'} found on the server.`:'No EDF/BDF recordings found on the server yet. Upload one here or from Waveforms, then tap Refresh file list.';
  $('analysisFile').innerHTML='<option value="">Select a file…</option>'+otherFiles.map(f=>`<option value="${f.id}">${esc(f.original_name)} (${fmtBytes(f.size_bytes)})</option>`).join('');
  $('edfAnalysisFile').innerHTML='<option value="">Select an EDF/BDF recording…</option>'+edfFiles.map(f=>`<option value="${f.id}">${esc(f.original_name)} · ${fmtBytes(f.size_bytes)}</option>`).join('');
- $('pdfFile').innerHTML='<option value="">Select PDF…</option>'+files.filter(f=>f.extension==='.pdf').map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');
- $('predictionFile').innerHTML='<option value="">Select CSV/TSV…</option>'+files.filter(f=>['.csv','.tsv','.txt'].includes(f.extension)).map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');
+ $('pdfFile').innerHTML='<option value="">Select PDF…</option>'+files.filter(f=>extensionOf(f)==='.pdf').map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');
+ $('predictionFile').innerHTML='<option value="">Select CSV/TSV…</option>'+files.filter(f=>['.csv','.tsv','.txt'].includes(extensionOf(f))).map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');
  if(otherFiles.some(f=>f.id===oldAnalysis))$('analysisFile').value=oldAnalysis;
- if(files.some(f=>f.id===oldPdf&&f.extension==='.pdf'))$('pdfFile').value=oldPdf;
- if(files.some(f=>f.id===oldPrediction&&['.csv','.tsv','.txt'].includes(f.extension)))$('predictionFile').value=oldPrediction;
+ if(files.some(f=>f.id===oldPdf&&extensionOf(f)==='.pdf'))$('pdfFile').value=oldPdf;
+ if(files.some(f=>f.id===oldPrediction&&['.csv','.tsv','.txt'].includes(extensionOf(f))))$('predictionFile').value=oldPrediction;
  if(edfFiles.some(f=>f.id===oldEdf))$('edfAnalysisFile').value=oldEdf;
  else if(edfFiles.length)$('edfAnalysisFile').value=edfFiles[0].id;
 }
-async function renderImageUploads(){const area=$('imageSelectionGrid');const imgs=files.filter(f=>['.png','.jpg','.jpeg','.webp'].includes(f.extension));if(!imgs.length){area.innerHTML='<div class="empty">Uploaded PNG/JPG/WEBP images will appear here.</div>';return;}area.innerHTML='';for(const f of imgs){const card=document.createElement('div');card.className='image-select-card';const chosen=pageSelections.get(f.id)?.has(0)||false;card.innerHTML=`<img alt="${esc(f.original_name)}" src=""><div class="img-name">${esc(f.original_name)}</div><label><input type="checkbox" ${chosen?'checked':''}> Include in reviewer PDF</label>`;area.appendChild(card);const img=card.querySelector('img');if(imagePreviewCache.has(f.id)){img.src=imagePreviewCache.get(f.id);}else{const resp=await fetch(API+`/files/${f.id}/download`,{headers:authHeaders()});if(resp.ok){const url=URL.createObjectURL(await resp.blob());imagePreviewCache.set(f.id,url);img.src=url;}}const check=card.querySelector('input');check.addEventListener('change',e=>{if(!pageSelections.has(f.id))pageSelections.set(f.id,new Set());const set=pageSelections.get(f.id);if(e.target.checked){if(totalSelectedPages()>=8){e.target.checked=false;toast('Maximum 8 pages/images per study.');return;}set.add(0);}else set.delete(0);updateSelectedPageCount();});}}
+async function renderImageUploads(){const area=$('imageSelectionGrid');const imgs=files.filter(f=>['.png','.jpg','.jpeg','.webp'].includes(extensionOf(f)));if(!imgs.length){area.innerHTML='<div class="empty">Uploaded PNG/JPG/WEBP images will appear here.</div>';return;}area.innerHTML='';for(const f of imgs){const card=document.createElement('div');card.className='image-select-card';const chosen=pageSelections.get(f.id)?.has(0)||false;card.innerHTML=`<img alt="${esc(f.original_name)}" src=""><div class="img-name">${esc(f.original_name)}</div><label><input type="checkbox" ${chosen?'checked':''}> Include in reviewer PDF</label>`;area.appendChild(card);const img=card.querySelector('img');if(imagePreviewCache.has(f.id)){img.src=imagePreviewCache.get(f.id);}else{const resp=await fetch(API+`/files/${f.id}/download`,{headers:authHeaders()});if(resp.ok){const url=URL.createObjectURL(await resp.blob());imagePreviewCache.set(f.id,url);img.src=url;}}const check=card.querySelector('input');check.addEventListener('change',e=>{if(!pageSelections.has(f.id))pageSelections.set(f.id,new Set());const set=pageSelections.get(f.id);if(e.target.checked){if(totalSelectedPages()>=8){e.target.checked=false;toast('Maximum 8 pages/images per study.');return;}set.add(0);}else set.delete(0);updateSelectedPageCount();});}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function setUploadDiagnostic(message,state='info'){
   const el=$('uploadDiagnostic');
@@ -271,7 +274,8 @@ $('edfDirectFileInput').addEventListener('change',async e=>{
  $('edfUploadStatus').textContent='Uploading '+file.name+' ('+fmtBytes(file.size)+')… Keep this page open until upload finishes.';
  try{
   await uploadFiles([file]);
-  const uploaded=files.find(f=>f.original_name===file.name&&['.edf','.bdf'].includes(f.extension));
+  await refreshEdfFileSelect();
+  const uploaded=files.find(f=>f.original_name===file.name&&['.edf','.bdf'].includes(extensionOf(f)));
   if(uploaded){
    $('edfAnalysisFile').value=uploaded.id;
    $('edfUploadStatus').textContent='Upload complete: '+file.name+'. It is saved on the NeuroBridge server and selected below. Tap Run EDF/BDF analysis.';
@@ -284,6 +288,8 @@ $('edfDirectFileInput').addEventListener('change',async e=>{
   toast(err?.message||'EDF upload failed');
  }finally{e.target.value='';}
 });
+$('edfChooseFileBtn').addEventListener('click',()=> $('edfDirectFileInput').click());
+$('refreshEdfFilesBtn').addEventListener('click',async()=>{const b=$('refreshEdfFilesBtn');b.disabled=true;try{const count=await refreshEdfFileSelect();toast(count?`${count} EDF/BDF recording(s) found`:'No EDF/BDF recordings found');}catch(e){$('edfFileListStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;toast(e.message);}finally{b.disabled=false;}});
 $('analyseEdfBtn').addEventListener('click',runEdfAnalysis);
 $('loadEdfWaveform').addEventListener('click',loadEdfWaveform);
 
