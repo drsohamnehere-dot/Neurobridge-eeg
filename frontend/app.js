@@ -260,6 +260,30 @@ async function runEdfAnalysis(){
  }catch(e){$('edfAnalysisStatus').textContent='EDF/BDF analysis failed: '+e.message;}
  finally{button.disabled=false;}
 }
+$('edfDirectFileInput').addEventListener('change',async e=>{
+ const selected=Array.from(e.target.files||[]);
+ if(!selected.length){$('edfUploadStatus').textContent='No file selected. Tap Choose EDF/BDF file and select a recording from Files.';return;}
+ const invalid=selected.filter(f=>!(/\.(edf|bdf)$/i.test(f.name)));
+ if(invalid.length){$('edfUploadStatus').textContent='Unsupported file. Please choose an .edf or .bdf recording.';toast('Please select an EDF or BDF file.');e.target.value='';return;}
+ const file=selected[0];
+ if(file.size>500*1024*1024){$('edfUploadStatus').textContent='This file is larger than the 500 MB upload limit.';toast('File exceeds 500 MB.');e.target.value='';return;}
+ if(!file.size){$('edfUploadStatus').textContent='This file is empty. Please choose a valid EDF/BDF recording.';e.target.value='';return;}
+ $('edfUploadStatus').textContent='Uploading '+file.name+' ('+fmtBytes(file.size)+')… Keep this page open until upload finishes.';
+ try{
+  await uploadFiles([file]);
+  const uploaded=files.find(f=>f.original_name===file.name&&['.edf','.bdf'].includes(f.extension));
+  if(uploaded){
+   $('edfAnalysisFile').value=uploaded.id;
+   $('edfUploadStatus').textContent='Upload complete: '+file.name+'. It is saved on the NeuroBridge server and selected below. Tap Run EDF/BDF analysis.';
+   toast('EDF/BDF recording uploaded successfully.');
+  }else{
+   $('edfUploadStatus').textContent='Upload was attempted, but the recording is not visible in the server file list. Check the upload message on the Upload Files tab and retry if needed.';
+  }
+ }catch(err){
+  $('edfUploadStatus').textContent='Upload failed: '+(err?.message||String(err));
+  toast(err?.message||'EDF upload failed');
+ }finally{e.target.value='';}
+});
 $('analyseEdfBtn').addEventListener('click',runEdfAnalysis);
 $('loadEdfWaveform').addEventListener('click',loadEdfWaveform);
 

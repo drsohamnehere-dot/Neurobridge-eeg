@@ -14,3 +14,9 @@
 #edfWaveformCanvas{max-width:100%;touch-action:pan-y}
 #edfAnalysisText{max-height:520px;overflow:auto}
 @media(max-width:760px){#edfWaveformCanvas{height:440px!important}.pdf-tools input{width:100%;max-width:none!important}}
+
+.edf-upload-button{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:46px;padding:12px 18px;cursor:pointer;margin:8px 0 4px}
+.edf-upload-button span{font-size:20px;line-height:1}
+.edf-upload-hint{font-size:12px;color:var(--muted,#8293a5);margin-top:7px}
+.edf-upload-divider{height:1px;background:var(--line,#294054);margin:18px 0}
+#edfUploadStatus{min-height:22px;margin-top:8px;overflow-wrap:anywhere}
