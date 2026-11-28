@@ -894,6 +894,7 @@ def find_clean_eeg_segments(
                 "window_function": window_function,
                 "settings": spectral_settings,
                 "accepted_epochs": accepted_epoch_counts_by_state.get(state_name, 0),
+                "effective_spectrum_range_hz": [spectrum_min_hz, min(spectrum_max_hz, sfreq / 2.0)],
                 "channels": rhythm_ratio_rows_from_power_sums(power_sums, spectral_settings),
                 "formulae": {
                     "alpha_theta": "Alpha index / Theta index",
@@ -1555,7 +1556,8 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                 if ratio_analysis.get("note"):
                     story.append(Paragraph(xml_escape(str(ratio_analysis["note"])), styles["BodyText"]))
 
-            regular_ratio_analysis = summ.get("spectral_ratio_analysis")
+            signal_review_summary = summ.get("signal_review") or {}
+            regular_ratio_analysis = summ.get("spectral_ratio_analysis") or signal_review_summary.get("spectral_ratio_analysis")
             if regular_ratio_analysis:
                 append_spectral_ratio_table("FFT rhythm indices and spectral ratios (all analysed EDF window)", regular_ratio_analysis)
             clean_ratio_by_state = summ.get("spectral_ratio_analysis_by_state") or {}
