@@ -1496,6 +1496,75 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                 story.append(Paragraph(xml_escape(clean_screen.get("thresholds_note", "")), styles["BodyText"]))
                 story.append(Paragraph(xml_escape(clean_screen.get("clinical_note", "")), styles["BodyText"]))
                 story.append(Paragraph(xml_escape(clean_screen.get("state_consistency_note", "")), styles["BodyText"]))
+            def append_spectral_ratio_table(title, ratio_analysis):
+                if not ratio_analysis:
+                    return
+                from xml.sax.saxutils import escape as xml_escape
+                settings = ratio_analysis.get("settings") or {}
+                range_hz = ratio_analysis.get("effective_spectrum_range_hz")
+                if not range_hz:
+                    range_hz = [settings.get("spectrum_min_hz", 0.5), settings.get("spectrum_max_hz", 30.0)]
+                story.append(Paragraph(title, styles["Heading4"]))
+                story.append(Paragraph(
+                    f"FFT-power indices · total range {range_hz[0]}–{range_hz[1]} Hz · "
+                    f"window: {ratio_analysis.get('window_function', settings.get('window_function', '—'))} · "
+                    f"Beta LF: {settings.get('beta_lf_low_hz', '—')}–{settings.get('beta_lf_high_hz', '—')} Hz · "
+                    f"Beta HF: {settings.get('beta_hf_low_hz', '—')}–{settings.get('beta_hf_high_hz', '—')} Hz",
+                    styles["BodyText"],
+                ))
+                ratio_rows = [[
+                    "Channel", "Delta %", "Theta %", "Alpha %",
+                    "Beta LF %", "Beta HF %", "Alpha/Theta",
+                    "Theta/Beta", "Theta/Beta LF",
+                ]]
+                for item in ratio_analysis.get("channels", [])[:64]:
+                    indices = item.get("band_power_index_pct") or {}
+                    ratios = item.get("ratios") or {}
+                    fmt = lambda value: "—" if value is None else f"{float(value):.3f}"
+                    ratio_rows.append([
+                        str(item.get("channel", "")),
+                        fmt(indices.get("delta")),
+                        fmt(indices.get("theta")),
+                        fmt(indices.get("alpha")),
+                        fmt(indices.get("beta_lf")),
+                        fmt(indices.get("beta_hf")),
+                        fmt(ratios.get("alpha_theta")),
+                        fmt(ratios.get("theta_beta")),
+                        fmt(ratios.get("theta_beta_lf")),
+                    ])
+                if len(ratio_rows) > 1:
+                    ratio_table = Table(
+                        ratio_rows, repeatRows=1,
+                        colWidths=[17*mm, 17*mm, 17*mm, 17*mm, 19*mm, 19*mm, 22*mm, 21*mm, 22*mm],
+                    )
+                    ratio_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dceef1")),
+                        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                        ("PADDING", (0, 0), (-1, -1), 3),
+                        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]))
+                    story.append(ratio_table)
+                story.append(Paragraph(
+                    "Definitions: Alpha/Theta = alpha index ÷ theta index; "
+                    "Theta/Beta = theta index ÷ (beta LF index + beta HF index); "
+                    "Theta/Beta LF = theta index ÷ beta LF index. Rhythm indices use summed FFT-bin power in each band divided by total FFT-bin power in the configured spectrum range × 100%.",
+                    styles["BodyText"],
+                ))
+                if ratio_analysis.get("note"):
+                    story.append(Paragraph(xml_escape(str(ratio_analysis["note"])), styles["BodyText"]))
+
+            regular_ratio_analysis = summ.get("spectral_ratio_analysis")
+            if regular_ratio_analysis:
+                append_spectral_ratio_table("FFT rhythm indices and spectral ratios (all analysed EDF window)", regular_ratio_analysis)
+            clean_ratio_by_state = summ.get("spectral_ratio_analysis_by_state") or {}
+            for state_name, ratio_analysis in clean_ratio_by_state.items():
+                if ratio_analysis.get("channels"):
+                    append_spectral_ratio_table(
+                        "Clean-segment FFT rhythm indices and ratios — " + str(state_name).replace("_", " "),
+                        ratio_analysis,
+                    )
+
             signal_review = summ.get("signal_review")
             if signal_review:
                 from xml.sax.saxutils import escape as xml_escape
