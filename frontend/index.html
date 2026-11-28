@@ -60,7 +60,7 @@
       <p class="muted small">Scan the complete recording in 2- or 4-second epochs. NeuroBridge ranks low-artifact candidates and shows why other epochs need review.</p>
       <div class="edf-clean-controls">
         <div><label for="edfCleanEpoch">Epoch length</label><select id="edfCleanEpoch"><option value="2" selected>2 seconds</option><option value="4">4 seconds</option></select></div>
-        <div><label for="edfCleanState">Recording state</label><select id="edfCleanState"><option value="any" selected>All states — verify manually</option><option value="eyes_closed">Eyes closed — annotated only</option><option value="eyes_open">Eyes open — annotated only</option><option value="alert_awake">Alert / awake — annotated only</option></select></div>
+        <div><label for="edfCleanState">Recording state</label><select id="edfCleanState"><option value="any" selected>All states — verify manually</option><option value="eyes_closed">Eyes closed — annotated only</option><option value="eyes_open">Eyes open — annotated only</option><option value="alert_awake">Alert / awake — annotated only</option><option value="drowsy_or_sleep">Drowsy / sleep — annotated only</option></select></div>
       </div>
       <p class="muted tiny">State-specific filtering requires clear EDF event markers. Unlabelled segments are not assumed to be awake, eyes-open or eyes-closed. The first 3 seconds after recognised state markers and any BAD/artifact annotations are skipped.</p>
       <button type="button" class="primary-btn" id="findCleanSegmentsBtn">Find low-artifact segments</button>
