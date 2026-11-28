@@ -271,6 +271,74 @@ async function runEdfAnalysis(){
  }catch(e){$('edfAnalysisStatus').textContent='EDF/BDF analysis failed: '+e.message;}
  finally{button.disabled=false;}
 }
+
+function renderCleanSegmentResults(result){
+ const s=result.summary||{};
+ $('cleanSegmentsResults').classList.remove('hidden');
+ const metrics=[
+  ['Epochs scanned',s.epochs_scanned??0],
+  ['Low-artifact epochs',s.low_artifact_epochs??0],
+  ['Candidate seconds',s.low_artifact_seconds_total??0],
+  ['Longest continuous run',s.longest_contiguous_candidate_seconds??0],
+  ['60-second total target',s.minimum_60_seconds_available?'Reached':'Not reached'],
+  ['60 seconds in one identified state',s.minimum_60_seconds_in_one_identified_state?'Reached':'Not verified'],
+  ['Channels assessed',s.channels_assessed??0],
+  ['EOG / ECG / EMG leads',`${(s.eog_channels_available||[]).length} / ${(s.ecg_channels_available||[]).length} / ${(s.emg_channels_available||[]).length}`],
+ ];
+ $('cleanSegmentsSummary').innerHTML=metrics.map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+ $('cleanSegmentsStateLabel').textContent=(s.target_state||'any').replaceAll('_',' ');
+ const intervals=s.candidate_intervals||[];
+ $('cleanSegmentsIntervals').innerHTML=intervals.length
+  ? intervals.slice(0,30).map(item=>`<div class="clean-interval"><strong>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)} s</strong><span>${Number(item.duration_seconds).toFixed(1)} s · ${item.epoch_count} epochs</span><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View</button></div>`).join('')
+  : '<p class="muted small">No epoch met every low-artifact candidate rule. Review the flagged epochs and original EEG manually.</p>';
+ const epochs=s.best_epochs||[];
+ $('cleanSegmentsRows').innerHTML=epochs.length?epochs.map(item=>{
+  const flagged=(item.flagged_channels||[]);
+  const flagNames={
+   possible_flat_or_disconnected_channel:'flat/disconnected',
+   possible_non_finite_samples:'invalid samples',
+   possible_large_amplitude_artifact:'large amplitude',
+   possible_abrupt_step_or_electrode_pop:'abrupt step/pop',
+   possible_high_frequency_muscle_emg:'possible muscle/EMG',
+   possible_50_hz_line_noise:'50 Hz line noise',
+   possible_sweat_or_baseline_drift:'baseline drift',
+   possible_frontal_eye_movement_or_slow_activity:'frontal slow/eye candidate'
+  };
+  const flags=flagged.reduce((sum,entry)=>sum+(entry.flags||[]).length,0);
+  const flagText=flagged.map(entry=>entry.channel+': '+entry.flags.map(flag=>flagNames[flag]||flag).join(', ')).join('; ');
+  const state=(item.state||'unlabelled').replaceAll('_',' ');
+  return `<tr><td>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)}</td><td>${esc(state)}</td><td>${Number(item.quality_score).toFixed(1)}/100</td><td title="${esc(flagText)}">${flags?esc(flagText):'None flagged'}</td><td><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View waveform</button></td></tr>`;
+ }).join(''):'<tr><td colspan="5">No candidate epoch available.</td></tr>';
+ $('cleanSegmentsDisclaimer').textContent=
+  (s.state_labeling_note||'')+' Clean candidate seconds by state: '+JSON.stringify(s.low_artifact_seconds_by_state||{})+'. '+(s.state_consistency_note||'')+' Auxiliary leads available (not yet used for automated correction): EOG '+JSON.stringify(s.eog_channels_available||[])+', ECG '+JSON.stringify(s.ecg_channels_available||[])+', EMG '+JSON.stringify(s.emg_channels_available||[])+'. '+(s.thresholds_note||'')+' '+(s.clinical_note||'');
+ $('cleanSegmentsRows').querySelectorAll('[data-clean-start]').forEach(button=>button.addEventListener('click',()=>{
+  $('edfStartSeconds').value=button.dataset.cleanStart;
+  loadEdfWaveform();
+ }));
+ $('cleanSegmentsIntervals').querySelectorAll('[data-clean-start]').forEach(button=>button.addEventListener('click',()=>{
+  $('edfStartSeconds').value=button.dataset.cleanStart;
+  loadEdfWaveform();
+ }));
+}
+async function runCleanSegmentFinder(){
+ const id=$('edfAnalysisFile').value;
+ if(!id){$('cleanSegmentsStatus').textContent='Select an EDF/BDF recording first.';return;}
+ const button=$('findCleanSegmentsBtn');button.disabled=true;
+ $('cleanSegmentsResults').classList.add('hidden');
+ $('cleanSegmentsStatus').textContent='Scanning the complete recording in short epochs. Long files may take some time…';
+ try{
+  const epoch=Number($('edfCleanEpoch').value)||2;
+  const state=$('edfCleanState').value||'any';
+  const capacity=Number($('edfChannelLimit').value)||24;
+  const result=await api(`/files/${id}/find-clean-segments?epoch_seconds=${epoch}&channel_limit=${capacity}&target_state=${encodeURIComponent(state)}`,{method:'POST'});
+  renderCleanSegmentResults(result);
+  const summary=result.summary||{};
+  $('cleanSegmentsStatus').textContent=`Scan complete: ${summary.low_artifact_seconds_total} seconds of low-artifact candidate epochs found from ${summary.epochs_scanned} eligible epochs. These require visual confirmation.`;
+  await refreshAll();
+ }catch(e){$('cleanSegmentsStatus').textContent='Segment scan failed: '+e.message;}
+ finally{button.disabled=false;}
+}
+
 $('edfDirectFileInput').addEventListener('change',async e=>{
  const selected=Array.from(e.target.files||[]);
  if(!selected.length){$('edfUploadStatus').textContent='No file selected. Tap Choose EDF/BDF file and select a recording from Files.';return;}
@@ -299,6 +367,7 @@ $('edfDirectFileInput').addEventListener('change',async e=>{
 $('edfChooseFileBtn').addEventListener('click',()=> $('edfDirectFileInput').click());
 $('refreshEdfFilesBtn').addEventListener('click',async()=>{const b=$('refreshEdfFilesBtn');b.disabled=true;try{const count=await refreshEdfFileSelect();toast(count?`${count} EDF/BDF recording(s) found`:'No EDF/BDF recordings found');}catch(e){$('edfFileListStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;toast(e.message);}finally{b.disabled=false;}});
 $('analyseEdfBtn').addEventListener('click',runEdfAnalysis);
+$('findCleanSegmentsBtn').addEventListener('click',runCleanSegmentFinder);
 $('loadEdfWaveform').addEventListener('click',loadEdfWaveform);
 
 $('loadPdf').addEventListener('click',async()=>{const id=$('pdfFile').value;if(!id){toast('Select a PDF first.');return;}const area=$('pdfPages');area.innerHTML='<div class="muted small">Reading PDF page list…</div>';try{const r=await api(`/files/${id}/pdf-info`);area.innerHTML='';if(!pageSelections.has(id))pageSelections.set(id,new Set());for(const p of r.pages){const card=document.createElement('div');card.className='pdf-page';const checked=pageSelections.get(id).has(p.page);card.innerHTML=`<img alt="PDF page ${p.page}" src=""><label><input type="checkbox" data-pdf-page="${p.page}" ${checked?'checked':''}> Select page ${p.page}</label><span>${p.width} × ${p.height} pt · ${p.has_text?'Embedded text':'Scanned/image page'}</span>`;area.appendChild(card);const img=card.querySelector('img');const resp=await fetch(API+`/files/${id}/pdf-page/${p.page}`,{headers:authHeaders()});if(resp.ok)img.src=URL.createObjectURL(await resp.blob());card.querySelector('input').addEventListener('change',e=>{const set=pageSelections.get(id);if(e.target.checked){if(totalSelectedPages()>=8){e.target.checked=false;toast('Maximum 8 pages per study.');return;}set.add(p.page);}else set.delete(p.page);updateSelectedPageCount();});}if(!r.pages.length)area.innerHTML='<div class="empty">No pages found.</div>';updateSelectedPageCount();}catch(e){area.innerHTML=`<div class="small" style="color:var(--red)">${esc(e.message)}</div>`;}});

@@ -586,6 +586,334 @@ def analyse_edf(path: Path, channel_limit: int = 64) -> dict[str, Any]:
             raw.close()
 
 
+
+@app.post("/api/files/{file_id}/find-clean-segments")
+def find_clean_eeg_segments(
+    file_id: str,
+    epoch_seconds: int = 2,
+    channel_limit: int = 24,
+    target_state: str = "any",
+    _: None = Depends(require_auth),
+):
+    """Find ranked low-artifact candidate epochs across an EDF/BDF recording.
+
+    This is conservative heuristic screening, not proof of artifact-free EEG.
+    """
+    if epoch_seconds not in {2, 4}:
+        raise HTTPException(422, "epoch_seconds must be 2 or 4.")
+    if channel_limit not in {24, 32, 64}:
+        raise HTTPException(422, "channel_limit must be 24, 32 or 64.")
+    if target_state not in {"any", "eyes_closed", "eyes_open", "alert_awake", "drowsy_or_sleep"}:
+        raise HTTPException(422, "Unsupported target_state.")
+
+    rec = get_file_record(file_id)
+    if rec["extension"] not in {".edf", ".bdf"}:
+        raise HTTPException(415, "Low-artifact segment screening requires an EDF/BDF recording.")
+
+    raw = None
+    try:
+        import re
+        import mne
+        from server.eeg_signal_review import (
+            assess_eeg_epoch_artifacts,
+            apply_channel_limit,
+            merge_candidate_epoch_intervals,
+            scalp_eeg_channel_indices,
+        )
+
+        raw = mne.io.read_raw(rec["path"], preload=False, verbose="ERROR")
+        sfreq = float(raw.info["sfreq"])
+        sample_count = int(raw.n_times)
+        duration = sample_count / sfreq if sfreq > 0 else 0.0
+        if not np.isfinite(sfreq) or sfreq <= 0 or sample_count <= 0:
+            raise HTTPException(422, "The EDF/BDF header has invalid sampling metadata.")
+
+        scalp_picks = scalp_eeg_channel_indices(raw.ch_names)
+        selection_note = "Scalp channels identified from standard electrode labels."
+        if not scalp_picks:
+            scalp_picks = [i for i, kind in enumerate(raw.get_channel_types()) if kind == "eeg"]
+            selection_note = "Standard scalp labels were not recognised; MNE EEG channel types were used. Verify this channel selection."
+        selected_picks = apply_channel_limit(scalp_picks, channel_limit)
+        if not selected_picks:
+            raise HTTPException(422, "No scalp EEG channels were identified. Check the EDF channel labels or add a channel map.")
+        channel_types = raw.get_channel_types()
+        auxiliary_channels = [
+            {"name": raw.ch_names[index], "type": channel_types[index]}
+            for index in range(len(raw.ch_names)) if index not in set(scalp_picks)
+        ]
+        eog_channels = [
+            name for name, kind in zip(raw.ch_names, channel_types)
+            if kind == "eog" or "EOG" in name.upper()
+        ]
+        ecg_channels = [
+            name for name, kind in zip(raw.ch_names, channel_types)
+            if kind == "ecg" or "ECG" in name.upper()
+        ]
+        emg_channels = [
+            name for name, kind in zip(raw.ch_names, channel_types)
+            if kind == "emg" or "EMG" in name.upper()
+        ]
+
+        annotations = [
+            {
+                "onset": float(item["onset"]),
+                "duration": max(0.0, float(item["duration"])),
+                "description": str(item["description"] or ""),
+            }
+            for item in raw.annotations
+        ]
+
+        def state_from_description(description: str) -> str | None:
+            text = re.sub(r"[_-]+", " ", description.casefold()).strip()
+            compact = re.sub(r"\s+", " ", text)
+            words = set(compact.split())
+            if "eyes closed" in compact or "close eyes" in compact or "closed eyes" in compact or compact in {"ec", "ec marker"}:
+                return "eyes_closed"
+            if "eyes open" in compact or "open eyes" in compact or compact in {"eo", "eo marker"}:
+                return "eyes_open"
+            if "drowsy" in words or "sleep" in words or "asleep" in words:
+                return "drowsy_or_sleep"
+            if "awake" in words or "alert" in words or compact in {"wake", "w"}:
+                return "alert_awake"
+            return None
+
+        state_events = sorted(
+            [
+                {"onset": item["onset"], "state": state_from_description(item["description"]), "description": item["description"]}
+                for item in annotations if state_from_description(item["description"]) is not None
+            ],
+            key=lambda item: item["onset"],
+        )
+        if target_state != "any" and not any(item["state"] == target_state for item in state_events):
+            label = {"eyes_closed": "eyes-closed", "eyes_open": "eyes-open", "alert_awake": "alert/awake", "drowsy_or_sleep": "drowsy/sleep"}[target_state]
+            raise HTTPException(
+                422,
+                f"No {label} state markers were recognised in this EDF/BDF file. Use 'All states — verify manually' or add clear event annotations before filtering by state.",
+            )
+
+        bad_annotations = [
+            item for item in annotations
+            if item["description"].strip().casefold().startswith(("bad", "artifact", "artefact"))
+        ]
+        epoch_samples = int(round(epoch_seconds * sfreq))
+        if epoch_samples < 32:
+            raise HTTPException(422, "The selected epoch is too short for this sampling rate.")
+        epochs_per_chunk = max(1, int((30.0 * sfreq) // epoch_samples))
+        chunk_samples = epochs_per_chunk * epoch_samples
+
+        epoch_results: list[dict[str, Any]] = []
+        band_rows: list[tuple[float, dict[str, float]]] = []
+        skipped_bad = 0
+        skipped_transition = 0
+        skipped_state = 0
+        epochs_scanned = 0
+
+        def active_state_at(moment: float) -> dict[str, Any] | None:
+            active = None
+            for event in state_events:
+                if event["onset"] <= moment:
+                    active = event
+                else:
+                    break
+            return active
+
+        for chunk_start in range(0, sample_count, chunk_samples):
+            chunk_stop = min(sample_count, chunk_start + chunk_samples)
+            chunk_data = raw.get_data(
+                picks=selected_picks,
+                start=chunk_start,
+                stop=chunk_stop,
+                reject_by_annotation=None,
+            )
+            local_start = 0
+            while local_start + epoch_samples <= chunk_data.shape[1]:
+                absolute_start_sample = chunk_start + local_start
+                start_seconds = absolute_start_sample / sfreq
+                end_seconds = (absolute_start_sample + epoch_samples) / sfreq
+                midpoint = (start_seconds + end_seconds) / 2.0
+
+                active_state = active_state_at(midpoint)
+                state_name = active_state["state"] if active_state else "unlabelled"
+                if target_state != "any" and state_name != target_state:
+                    skipped_state += 1
+                    local_start += epoch_samples
+                    continue
+                if active_state and start_seconds < active_state["onset"] + 3.0:
+                    skipped_transition += 1
+                    local_start += epoch_samples
+                    continue
+                if any(
+                    (item["duration"] > 0 and item["onset"] < end_seconds and item["onset"] + item["duration"] > start_seconds)
+                    or (item["duration"] == 0 and start_seconds <= item["onset"] < end_seconds)
+                    for item in bad_annotations
+                ):
+                    skipped_bad += 1
+                    local_start += epoch_samples
+                    continue
+
+                epoch_data = chunk_data[:, local_start:local_start + epoch_samples]
+                assessment = assess_eeg_epoch_artifacts(
+                    data_volts=epoch_data,
+                    sfreq=sfreq,
+                    channel_names=[raw.ch_names[i] for i in selected_picks],
+                )
+                epochs_scanned += 1
+                epoch_results.append({
+                    "start_seconds": round(start_seconds, 3),
+                    "end_seconds": round(end_seconds, 3),
+                    "duration_seconds": round(epoch_seconds, 3),
+                    "state": state_name,
+                    "status": assessment["status"],
+                    "quality_score": assessment["quality_score"],
+                    "channels_with_hard_flags": assessment["channels_with_hard_flags"],
+                    "channels_with_review_flags": assessment["channels_with_review_flags"],
+                    "flagged_channels": [
+                        {"channel": item["channel"], "flags": item.get("flags", [])}
+                        for item in assessment["channels"] if item.get("flags")
+                    ],
+                    "median_channel_band_power_pct": assessment["median_channel_band_power_pct"],
+                })
+                if assessment["status"] == "low_artifact_candidate":
+                    band_rows.append((midpoint, assessment["median_channel_band_power_pct"]))
+                local_start += epoch_samples
+
+        if not epoch_results:
+            raise HTTPException(422, "No eligible EEG epochs were available after state, transition and bad-annotation filtering.")
+
+        intervals = merge_candidate_epoch_intervals(epoch_results)
+        low_artifact_epochs = sum(1 for item in epoch_results if item["status"] == "low_artifact_candidate")
+        low_artifact_seconds = round(low_artifact_epochs * epoch_seconds, 1)
+        longest_run = max((item["duration_seconds"] for item in intervals), default=0.0)
+        clean_seconds_by_state: dict[str, float] = {}
+        for item in epoch_results:
+            if item["status"] == "low_artifact_candidate":
+                state_key = str(item.get("state") or "unlabelled")
+                clean_seconds_by_state[state_key] = clean_seconds_by_state.get(state_key, 0.0) + epoch_seconds
+        clean_seconds_by_state = {key: round(value, 1) for key, value in clean_seconds_by_state.items()}
+        identified_state_keys = {"eyes_closed", "eyes_open", "alert_awake", "drowsy_or_sleep"}
+        identified_state_seconds = {
+            key: value for key, value in clean_seconds_by_state.items()
+            if key in identified_state_keys
+        }
+        longest_state_seconds = max(identified_state_seconds.values(), default=0.0)
+        state_specific_60s_met = longest_state_seconds >= 60.0 and (
+            target_state != "any" or bool(state_events)
+        )
+        flag_counts: dict[str, int] = {}
+        for item in epoch_results:
+            for channel in item["flagged_channels"]:
+                for flag in channel["flags"]:
+                    flag_counts[flag] = flag_counts.get(flag, 0) + 1
+
+        split_half = None
+        if len(band_rows) >= 4:
+            midpoint_index = len(band_rows) // 2
+            first_half = band_rows[:midpoint_index]
+            second_half = band_rows[midpoint_index:]
+            band_comparison = {}
+            for band in ("delta", "theta", "alpha", "beta", "low_gamma"):
+                first_values = [row[1][band] for row in first_half if band in row[1]]
+                second_values = [row[1][band] for row in second_half if band in row[1]]
+                if first_values and second_values:
+                    first_median = float(np.median(first_values))
+                    second_median = float(np.median(second_values))
+                    band_comparison[band] = {
+                        "first_half_median_pct": round(first_median, 2),
+                        "second_half_median_pct": round(second_median, 2),
+                        "absolute_difference_percentage_points": round(abs(first_median - second_median), 2),
+                    }
+            split_half = {
+                "method": "Chronological first-half versus second-half comparison of accepted epochs.",
+                "bands": band_comparison,
+                "note": "Descriptive stability check only; differences do not prove or exclude artefact or pathology.",
+            }
+
+        best_epochs = sorted(
+            [item for item in epoch_results if item["status"] == "low_artifact_candidate"],
+            key=lambda item: (-item["quality_score"], item["start_seconds"]),
+        )[:60]
+        if not best_epochs:
+            best_epochs = sorted(
+                epoch_results,
+                key=lambda item: (item["channels_with_hard_flags"], item["channels_with_review_flags"], -item["quality_score"], item["start_seconds"]),
+            )[:20]
+
+        state_labeling = (
+            "State selected from recognised EDF/BDF event annotations."
+            if target_state != "any" else
+            ("State markers were found; all states are included and must not be mixed for state-specific qEEG."
+             if state_events else
+             "No recognised eyes-open/eyes-closed/awake markers were found. State is unlabelled; manually select one condition and do not mix states.")
+        )
+        summary = {
+            "kind": "clean_segment_screening",
+            "method": "Full-recording heuristic low-artifact candidate epoch screening",
+            "file_id": file_id,
+            "filename": rec["original_name"],
+            "recording_duration_seconds": round(duration, 3),
+            "sampling_rate_hz": sfreq,
+            "available_scalp_channel_count": len(scalp_picks),
+            "channels_assessed": len(selected_picks),
+            "requested_channel_capacity": channel_limit,
+            "auxiliary_channel_count": len(auxiliary_channels),
+            "auxiliary_channels": auxiliary_channels,
+            "eog_channels_available": eog_channels,
+            "ecg_channels_available": ecg_channels,
+            "emg_channels_available": emg_channels,
+            "channel_selection_note": selection_note,
+            "epoch_seconds": epoch_seconds,
+            "epoch_overlap_seconds": 0,
+            "target_state": target_state,
+            "state_labeling_note": state_labeling,
+            "transition_guard_seconds": 3,
+            "epochs_scanned": epochs_scanned,
+            "epochs_skipped_bad_annotations": skipped_bad,
+            "epochs_skipped_state_mismatch": skipped_state,
+            "epochs_skipped_state_transition": skipped_transition,
+            "low_artifact_epochs": low_artifact_epochs,
+            "low_artifact_seconds_total": low_artifact_seconds,
+            "minimum_60_seconds_available": low_artifact_seconds >= 60.0,
+            "low_artifact_seconds_by_state": clean_seconds_by_state,
+            "minimum_60_seconds_in_one_identified_state": state_specific_60s_met,
+            "longest_candidate_state_seconds": round(longest_state_seconds, 1),
+            "longest_contiguous_candidate_seconds": round(longest_run, 3),
+            "candidate_intervals": intervals[:100],
+            "best_epochs": best_epochs,
+            "review_required_epochs": epochs_scanned - low_artifact_epochs,
+            "artifact_flag_counts": flag_counts,
+            "split_half_consistency": split_half,
+            "thresholds_note": (
+                "Thresholds are conservative engineering heuristics for prioritising visual review, not clinically validated artefact detectors. "
+                "An epoch with no flags is only a low-artifact candidate; subtle eye, ECG, muscle, sweat, drowsiness and electrode artefacts may remain. "
+                f"EOG channels available: {len(eog_channels)}; ECG channels available: {len(ecg_channels)}; EMG channels available: {len(emg_channels)}. "
+                "These auxiliary channels are listed but are not yet used for automatic regression or ICA artefact correction."
+            ),
+            "clinical_note": (
+                "Do not interpret this screen as proof that an epoch is artefact-free or physiologically normal. "
+                "A qualified EEG reviewer must inspect candidate segments in the original recording. "
+                "Potential epileptiform events must not be discarded solely because of amplitude or transient heuristics. Drowsiness is not independently classified unless it is identified in recording annotations."
+            ),
+            "state_consistency_note": (
+                "The 60-second target is only considered met within one identified state when clear state annotations exist or a state filter was selected. "
+                "When state is unlabelled, or several states are mixed, total candidate seconds must not be treated as a single-state qEEG sample."
+            ),
+        }
+        analysis_id = str(uuid.uuid4())
+        with db() as con:
+            con.execute(
+                "INSERT INTO analyses(id,file_id,study_id,created_at,kind,summary_json,extracted_text) VALUES(?,?,?,?,?,?,?)",
+                (analysis_id, file_id, rec.get("study_id"), now_iso(), "clean_segment_screening", json.dumps(summary), ""),
+            )
+        return {"id": analysis_id, "file_id": file_id, "summary": summary}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(422, f"Low-artifact segment scan failed: {e}")
+    finally:
+        if raw is not None:
+            raw.close()
+
+
 @app.get("/api/files/{file_id}/edf-preview")
 def edf_waveform_preview(
     file_id: str,
@@ -1063,6 +1391,43 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                 if k in summ:
                     lines.append(f"<b>{k.replace('_',' ').title()}:</b> {summ[k]}")
             story.append(Paragraph("<br/>".join(lines) or "No summary fields available.", styles["BodyText"]))
+            clean_screen = summ if summ.get("kind") == "clean_segment_screening" else None
+            if clean_screen:
+                from xml.sax.saxutils import escape as xml_escape
+                story.append(Paragraph("Low-artifact segment screening — heuristic review only", styles["Heading4"]))
+                clean_overview = [
+                    f"Epoch length: {clean_screen.get('epoch_seconds', '—')} s; epochs scanned: {clean_screen.get('epochs_scanned', 0)}",
+                    f"Scalp channels assessed: {clean_screen.get('channels_assessed', 0)} of {clean_screen.get('available_scalp_channel_count', 0)} available",
+                    f"Low-artifact candidate epochs: {clean_screen.get('low_artifact_epochs', 0)}; candidate seconds total: {clean_screen.get('low_artifact_seconds_total', 0)}",
+                    f"Longest continuous candidate interval: {clean_screen.get('longest_contiguous_candidate_seconds', 0)} s",
+                    f"At least 60 seconds total: {'Yes' if clean_screen.get('minimum_60_seconds_available') else 'No'}",
+                    f"At least 60 seconds within one identified state: {'Yes' if clean_screen.get('minimum_60_seconds_in_one_identified_state') else 'Not verified'}",
+                    f"Candidate seconds by state: {clean_screen.get('low_artifact_seconds_by_state', {})}",
+                    f"Skipped BAD/artifact annotation epochs: {clean_screen.get('epochs_skipped_bad_annotations', 0)}",
+                    f"Skipped transition epochs: {clean_screen.get('epochs_skipped_state_transition', 0)}",
+                ]
+                story.append(Paragraph("<br/>".join(xml_escape(line) for line in clean_overview), styles["BodyText"]))
+                clean_rows = [["Start (s)", "End (s)", "Duration (s)", "Epochs"]]
+                for interval in clean_screen.get("candidate_intervals", [])[:40]:
+                    clean_rows.append([
+                        str(interval.get("start_seconds", "")),
+                        str(interval.get("end_seconds", "")),
+                        str(interval.get("duration_seconds", "")),
+                        str(interval.get("epoch_count", "")),
+                    ])
+                if len(clean_rows) > 1:
+                    clean_table = Table(clean_rows, repeatRows=1, colWidths=[30*mm, 30*mm, 35*mm, 25*mm])
+                    clean_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dceef1")),
+                        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                        ("PADDING", (0, 0), (-1, -1), 4),
+                        ("FONTSIZE", (0, 0), (-1, -1), 7),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]))
+                    story.append(clean_table)
+                story.append(Paragraph(xml_escape(clean_screen.get("thresholds_note", "")), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(clean_screen.get("clinical_note", "")), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(clean_screen.get("state_consistency_note", "")), styles["BodyText"]))
             signal_review = summ.get("signal_review")
             if signal_review:
                 from xml.sax.saxutils import escape as xml_escape
