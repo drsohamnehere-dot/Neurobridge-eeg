@@ -224,9 +224,13 @@ async function loadEdfWaveform(){
  $('loadEdfWaveform').disabled=true;
  $('edfWaveformStatus').textContent='Loading raw EEG samples…';
  try{
-  const preview=await api(`/files/${id}/edf-preview?start_seconds=${encodeURIComponent(start)}&duration_seconds=10&max_channels=8`);
+  const channelLimit=Number($('edfChannelLimit').value)||24;
+  const preview=await api(`/files/${id}/edf-preview?start_seconds=${encodeURIComponent(start)}&duration_seconds=10&max_channels=${channelLimit}`);
   drawEdfWaveform(preview);
-  $('edfWaveformStatus').textContent=`Showing ${preview.channels.length} scalp channels · ${preview.start_seconds}–${(preview.start_seconds+preview.duration_seconds).toFixed(1)} s · preview resampled to ${preview.preview_sampling_rate_hz} Hz. ${preview.note}`;
+  const channelNote=preview.channels_displayed<channelLimit
+   ? `This file contains only ${preview.available_scalp_channel_count} recognised scalp EEG channels; all available channels are shown.`
+   : `Requested ${channelLimit}-channel capacity.`;
+  $('edfWaveformStatus').textContent=`Showing ${preview.channels_displayed} of ${preview.available_scalp_channel_count} available scalp channels · ${preview.start_seconds}–${(preview.start_seconds+preview.duration_seconds).toFixed(1)} s · preview resampled to ${preview.preview_sampling_rate_hz} Hz. ${channelNote} ${preview.note}`;
   $('edfStartSeconds').max=Math.max(0,preview.recording_duration_seconds-10);
  }catch(e){$('edfWaveformStatus').textContent='Waveform preview failed: '+e.message;}
  finally{$('loadEdfWaveform').disabled=false;}
@@ -253,13 +257,17 @@ function drawEdfWaveform(preview){
 async function runEdfAnalysis(){
  const id=$('edfAnalysisFile').value;
  if(!id){$('edfAnalysisStatus').textContent='Upload an EDF/BDF recording first, then select it here.';return;}
- const button=$('analyseEdfBtn');button.disabled=true;$('edfAnalysisStatus').textContent='Reading EDF/BDF header and analysing the initial EEG window…';$('edfAnalysisOutput').classList.add('hidden');
+ const button=$('analyseEdfBtn');button.disabled=true;
+ const channelLimit=Number($('edfChannelLimit').value)||24;
+ $('edfAnalysisStatus').textContent=`Reading EDF/BDF header and analysing up to ${channelLimit} scalp channels in the initial EEG window…`;
+ $('edfAnalysisOutput').classList.add('hidden');
  try{
-  const result=await api(`/files/${id}/analyse?ocr=false`,{method:'POST'});
+  const result=await api(`/files/${id}/analyse?ocr=false&channel_limit=${channelLimit}`,{method:'POST'});
   if(result.summary?.kind!=='edf_bdf')throw new Error('The selected file was not recognised as EDF/BDF.');
   renderAnalysis(result,'edfAnalysis');$('edfAnalysisOutput').classList.remove('hidden');$('edfStartSeconds').value='0';
-  $('edfAnalysisStatus').textContent='Analysis completed. Loading waveform preview…';
-  await loadEdfWaveform();$('edfAnalysisStatus').textContent='EDF/BDF analysis completed and saved.';await refreshAll();
+  const processed=result.summary?.analysis_channels_processed??result.summary?.signal_review?.channels_processed??0;
+  $('edfAnalysisStatus').textContent=`Analysis processed ${processed} of ${result.summary?.available_scalp_channel_count??processed} available scalp EEG channels. Loading waveform preview…`;
+  await loadEdfWaveform();$('edfAnalysisStatus').textContent=`EDF/BDF analysis saved · ${processed} scalp channels processed (maximum selected: ${channelLimit}).`;await refreshAll();
  }catch(e){$('edfAnalysisStatus').textContent='EDF/BDF analysis failed: '+e.message;}
  finally{button.disabled=false;}
 }
