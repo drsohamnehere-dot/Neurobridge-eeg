@@ -292,9 +292,11 @@ function renderCleanSegmentResults(result){
   : '<p class="muted small">No epoch met every low-artifact candidate rule. Review the flagged epochs and original EEG manually.</p>';
  const epochs=s.best_epochs||[];
  $('cleanSegmentsRows').innerHTML=epochs.length?epochs.map(item=>{
-  const flags=(item.flagged_channels||[]).reduce((sum,entry)=>sum+(entry.flags||[]).length,0);
+  const flagged=(item.flagged_channels||[]);
+  const flags=flagged.reduce((sum,entry)=>sum+(entry.flags||[]).length,0);
+  const flagText=flagged.map(entry=>entry.channel+': '+entry.flags.join(', ')).join('; ');
   const state=(item.state||'unlabelled').replaceAll('_',' ');
-  return `<tr><td>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)}</td><td>${esc(state)}</td><td>${Number(item.quality_score).toFixed(1)}/100</td><td>${flags}</td><td><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View waveform</button></td></tr>`;
+  return `<tr><td>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)}</td><td>${esc(state)}</td><td>${Number(item.quality_score).toFixed(1)}/100</td><td title="${esc(flagText)}">${flags?esc(flagged.map(entry=>entry.channel).join(', ')):'None flagged'}</td><td><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View waveform</button></td></tr>`;
  }).join(''):'<tr><td colspan="5">No candidate epoch available.</td></tr>';
  $('cleanSegmentsDisclaimer').textContent=
   (s.state_labeling_note||'')+' Clean candidate seconds by state: '+JSON.stringify(s.low_artifact_seconds_by_state||{})+'. '+(s.state_consistency_note||'')+' '+(s.thresholds_note||'')+' '+(s.clinical_note||'');
