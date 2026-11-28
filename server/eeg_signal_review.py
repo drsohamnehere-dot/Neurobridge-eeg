@@ -254,6 +254,8 @@ def assess_eeg_epoch_artifacts(
     data = np.asarray(data_volts, dtype=np.float64)
     if data.ndim != 2 or data.shape[0] == 0:
         raise ValueError("Epoch data must be a non-empty channels-by-samples array.")
+    if not channel_names:
+        raise ValueError("At least one scalp EEG channel name is required.")
     if not np.isfinite(sfreq) or sfreq <= 0:
         raise ValueError("Sampling frequency must be positive and finite.")
     if data.shape[1] < max(32, int(round(sfreq * 1.5))):
