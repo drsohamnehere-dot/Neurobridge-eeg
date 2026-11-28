@@ -604,8 +604,8 @@ def edf_waveform_preview(
         from scipy.signal import resample
         from server.eeg_signal_review import SUPPORTED_CHANNEL_LIMITS, scalp_eeg_channel_indices
 
-        if max_channels not in SUPPORTED_CHANNEL_LIMITS:
-            raise HTTPException(422, f"max_channels must be one of {SUPPORTED_CHANNEL_LIMITS}.")
+        if max_channels < 1 or max_channels > 64:
+            raise HTTPException(422, "max_channels must be between 1 and 64.")
         raw = mne.io.read_raw(rec["path"], preload=False, verbose="ERROR")
         sf = float(raw.info["sfreq"])
         total_seconds = float(raw.n_times / sf)
