@@ -280,7 +280,8 @@ function renderCleanSegmentResults(result){
   ['Low-artifact epochs',s.low_artifact_epochs??0],
   ['Candidate seconds',s.low_artifact_seconds_total??0],
   ['Longest continuous run',s.longest_contiguous_candidate_seconds??0],
-  ['60-second target',s.minimum_60_seconds_available?'Reached':'Not reached'],
+  ['60-second total target',s.minimum_60_seconds_available?'Reached':'Not reached'],
+  ['60 seconds in one identified state',s.minimum_60_seconds_in_one_identified_state?'Reached':'Not verified'],
   ['Channels assessed',s.channels_assessed??0],
  ];
  $('cleanSegmentsSummary').innerHTML=metrics.map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
@@ -296,7 +297,7 @@ function renderCleanSegmentResults(result){
   return `<tr><td>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)}</td><td>${esc(state)}</td><td>${Number(item.quality_score).toFixed(1)}/100</td><td>${flags}</td><td><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View waveform</button></td></tr>`;
  }).join(''):'<tr><td colspan="5">No candidate epoch available.</td></tr>';
  $('cleanSegmentsDisclaimer').textContent=
-  (s.state_labeling_note||'')+' '+(s.thresholds_note||'')+' '+(s.clinical_note||'');
+  (s.state_labeling_note||'')+' Clean candidate seconds by state: '+JSON.stringify(s.low_artifact_seconds_by_state||{})+'. '+(s.state_consistency_note||'')+' '+(s.thresholds_note||'')+' '+(s.clinical_note||'');
  $('cleanSegmentsRows').querySelectorAll('[data-clean-start]').forEach(button=>button.addEventListener('click',()=>{
   $('edfStartSeconds').value=button.dataset.cleanStart;
   loadEdfWaveform();
