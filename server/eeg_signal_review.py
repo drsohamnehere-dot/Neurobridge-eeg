@@ -223,3 +223,170 @@ def build_signal_review(
             "candidates. They are not clinically validated EEG abnormality thresholds."
         ),
     }
+
+
+# Heuristic artefact screening for selecting candidate low-artifact epochs.
+# These thresholds are engineering review prompts, not validated clinical cut-offs.
+ARTIFACT_HARD_FLAGS = {
+    "possible_flat_or_disconnected_channel",
+    "possible_large_amplitude_artifact",
+    "possible_non_finite_samples",
+}
+ARTIFACT_SOFT_FLAGS = {
+    "possible_abrupt_step_or_electrode_pop",
+    "possible_high_frequency_muscle_emg",
+    "possible_50_hz_line_noise",
+    "possible_sweat_or_baseline_drift",
+    "possible_frontal_eye_movement_or_slow_activity",
+}
+
+
+def assess_eeg_epoch_artifacts(
+    data_volts: np.ndarray,
+    sfreq: float,
+    channel_names: list[str],
+) -> dict[str, Any]:
+    """Score one short EEG epoch for engineering artefact-review candidates.
+
+    Inputs are volts in channels x samples. The score is not a probability and
+    "low_artifact_candidate" does not mean proven artifact-free.
+    """
+    data = np.asarray(data_volts, dtype=np.float64)
+    if data.ndim != 2 or data.shape[0] == 0:
+        raise ValueError("Epoch data must be a non-empty channels-by-samples array.")
+    if not np.isfinite(sfreq) or sfreq <= 0:
+        raise ValueError("Sampling frequency must be positive and finite.")
+    if data.shape[1] < max(32, int(round(sfreq * 1.5))):
+        raise ValueError("Epoch is too short; use at least 1.5 seconds.")
+
+    channel_results: list[dict[str, Any]] = []
+    band_rows: list[dict[str, float]] = []
+    hard_channels = 0
+    soft_channels = 0
+    for index in range(min(data.shape[0], len(channel_names))):
+        name = str(channel_names[index])
+        raw = data[index]
+        valid = np.isfinite(raw)
+        flags: list[str] = []
+        if float(np.mean(~valid)) > 0.005:
+            flags.append("possible_non_finite_samples")
+        if int(valid.sum()) < max(32, int(round(sfreq * 1.5))):
+            channel_results.append({
+                "channel": name, "usable": False,
+                "flags": flags or ["insufficient_finite_samples"],
+            })
+            hard_channels += 1
+            continue
+
+        x = raw[valid] * 1_000_000.0
+        centered = x - float(np.median(x))
+        ac_rms = float(np.sqrt(np.mean(np.square(centered))))
+        peak_abs = float(np.max(np.abs(centered)))
+        peak_to_peak = float(np.ptp(x))
+        differences = np.abs(np.diff(x))
+        flat_fraction = float(np.mean(differences < 0.01)) if differences.size else 0.0
+
+        if ac_rms < 0.5 and flat_fraction > 0.95:
+            flags.append("possible_flat_or_disconnected_channel")
+        if peak_to_peak > 500.0 or peak_abs > 500.0:
+            flags.append("possible_large_amplitude_artifact")
+        if differences.size:
+            robust_diff = float(1.4826 * np.median(np.abs(differences - np.median(differences))))
+            step_limit = max(100.0, 25.0 * robust_diff)
+            if float(np.max(differences)) > step_limit:
+                flags.append("possible_abrupt_step_or_electrode_pop")
+
+        window = np.hanning(x.size)
+        spectrum = np.square(np.abs(np.fft.rfft(centered * window)))
+        frequencies = np.fft.rfftfreq(x.size, d=1.0 / float(sfreq))
+
+        def band_sum(low: float, high: float) -> float:
+            mask = (frequencies >= low) & (frequencies < high)
+            return float(np.sum(spectrum[mask])) if np.any(mask) else 0.0
+
+        broad = band_sum(0.5, min(45.0, sfreq / 2.0))
+        delta = band_sum(0.5, min(4.0, sfreq / 2.0))
+        theta = band_sum(4.0, min(8.0, sfreq / 2.0))
+        alpha = band_sum(8.0, min(13.0, sfreq / 2.0))
+        beta = band_sum(13.0, min(30.0, sfreq / 2.0))
+        gamma = band_sum(30.0, min(45.0, sfreq / 2.0))
+        denom = max(broad, 1e-20)
+        band_percent = {
+            "delta": round(100.0 * delta / denom, 2),
+            "theta": round(100.0 * theta / denom, 2),
+            "alpha": round(100.0 * alpha / denom, 2),
+            "beta": round(100.0 * beta / denom, 2),
+            "low_gamma": round(100.0 * gamma / denom, 2),
+        }
+
+        muscle_ratio = band_sum(20.0, min(45.0, sfreq / 2.0)) / denom
+        if muscle_ratio > 0.45:
+            flags.append("possible_high_frequency_muscle_emg")
+        if sfreq / 2.0 >= 52.0:
+            mains_ratio = band_sum(49.0, 51.0) / denom
+            if mains_ratio > 0.20:
+                flags.append("possible_50_hz_line_noise")
+        drift_ratio = band_sum(0.1, min(0.5, sfreq / 2.0)) / max(band_sum(0.1, min(45.0, sfreq / 2.0)), 1e-20)
+        if drift_ratio > 0.70:
+            flags.append("possible_sweat_or_baseline_drift")
+        if name.upper().replace("EEG ", "").startswith(("FP1", "FP2", "FPZ")):
+            if band_percent["delta"] > 70.0 and peak_to_peak > 100.0:
+                flags.append("possible_frontal_eye_movement_or_slow_activity")
+
+        hard = any(flag in ARTIFACT_HARD_FLAGS for flag in flags)
+        soft = any(flag in ARTIFACT_SOFT_FLAGS for flag in flags)
+        hard_channels += int(hard)
+        soft_channels += int(soft)
+        band_rows.append(band_percent)
+        channel_results.append({
+            "channel": name,
+            "usable": True,
+            "ac_rms_uv": round(ac_rms, 3),
+            "peak_to_peak_uv": round(peak_to_peak, 3),
+            "peak_absolute_deviation_uv": round(peak_abs, 3),
+            "flat_sample_fraction_pct": round(100.0 * flat_fraction, 2),
+            "band_power_pct": band_percent,
+            "flags": flags,
+        })
+
+    channel_count = max(1, len(channel_results))
+    score = max(0.0, 100.0 - (55.0 * hard_channels / channel_count) - (20.0 * soft_channels / channel_count))
+    status = "low_artifact_candidate" if hard_channels == 0 and soft_channels == 0 and all(x.get("usable") for x in channel_results) else "review_required"
+    band_medians: dict[str, float] = {}
+    if band_rows:
+        for band in ("delta", "theta", "alpha", "beta", "low_gamma"):
+            band_medians[band] = round(float(np.median([row[band] for row in band_rows])), 2)
+    return {
+        "status": status,
+        "quality_score": round(score, 1),
+        "score_note": "Engineering quality score, not a probability or clinical grade.",
+        "channels_assessed": len(channel_results),
+        "channels_with_hard_flags": hard_channels,
+        "channels_with_review_flags": soft_channels,
+        "channels": channel_results,
+        "median_channel_band_power_pct": band_medians,
+    }
+
+
+def merge_candidate_epoch_intervals(epochs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge adjacent low-artifact candidate epochs into non-overlapping intervals."""
+    accepted = sorted(
+        (item for item in epochs if item.get("status") == "low_artifact_candidate"),
+        key=lambda item: float(item["start_seconds"]),
+    )
+    merged: list[dict[str, Any]] = []
+    for item in accepted:
+        start = float(item["start_seconds"])
+        end = float(item["end_seconds"])
+        if merged and start <= float(merged[-1]["end_seconds"]) + 0.001:
+            merged[-1]["end_seconds"] = round(max(float(merged[-1]["end_seconds"]), end), 3)
+            merged[-1]["epoch_count"] += 1
+            merged[-1]["duration_seconds"] = round(merged[-1]["end_seconds"] - merged[-1]["start_seconds"], 3)
+        else:
+            merged.append({
+                "start_seconds": round(start, 3),
+                "end_seconds": round(end, 3),
+                "duration_seconds": round(end - start, 3),
+                "epoch_count": 1,
+            })
+    return merged
