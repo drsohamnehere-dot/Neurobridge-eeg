@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from server.eeg_signal_review import build_signal_review
+from server.eeg_signal_review import apply_channel_limit, build_signal_review
 
 
 def test_signal_review_returns_bounded_channel_features():
@@ -72,3 +72,24 @@ def test_scalp_channel_selection_supports_reference_and_bipolar_labels():
 
     labels = ["EEG Fp1-Ref", "F3-C3", "ECG", "DC1", "A1"]
     assert scalp_eeg_channel_indices(labels) == [0, 1]
+
+
+
+@pytest.mark.parametrize("capacity", [24, 32, 64])
+def test_channel_capacity_limits_select_available_channels_only(capacity):
+    available = list(range(80))
+    selected = apply_channel_limit(available, capacity)
+    assert len(selected) == capacity
+    assert selected == available[:capacity]
+
+
+def test_channel_capacity_does_not_invent_missing_channels():
+    available = list(range(20))
+    assert apply_channel_limit(available, 24) == available
+    assert apply_channel_limit(available, 32) == available
+    assert apply_channel_limit(available, 64) == available
+
+
+def test_channel_capacity_rejects_unsupported_limit():
+    with pytest.raises(ValueError, match="Channel limit"):
+        apply_channel_limit(list(range(40)), 48)
