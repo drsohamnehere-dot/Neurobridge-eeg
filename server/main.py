@@ -636,6 +636,23 @@ def find_clean_eeg_segments(
         selected_picks = apply_channel_limit(scalp_picks, channel_limit)
         if not selected_picks:
             raise HTTPException(422, "No scalp EEG channels were identified. Check the EDF channel labels or add a channel map.")
+        channel_types = raw.get_channel_types()
+        auxiliary_channels = [
+            {"name": raw.ch_names[index], "type": channel_types[index]}
+            for index in range(len(raw.ch_names)) if index not in set(scalp_picks)
+        ]
+        eog_channels = [
+            name for name, kind in zip(raw.ch_names, channel_types)
+            if kind == "eog" or "EOG" in name.upper()
+        ]
+        ecg_channels = [
+            name for name, kind in zip(raw.ch_names, channel_types)
+            if kind == "ecg" or "ECG" in name.upper()
+        ]
+        emg_channels = [
+            name for name, kind in zip(raw.ch_names, channel_types)
+            if kind == "emg" or "EMG" in name.upper()
+        ]
 
         annotations = [
             {
@@ -773,9 +790,14 @@ def find_clean_eeg_segments(
                 state_key = str(item.get("state") or "unlabelled")
                 clean_seconds_by_state[state_key] = clean_seconds_by_state.get(state_key, 0.0) + epoch_seconds
         clean_seconds_by_state = {key: round(value, 1) for key, value in clean_seconds_by_state.items()}
-        longest_state_seconds = max(clean_seconds_by_state.values(), default=0.0)
+        identified_state_keys = {"eyes_closed", "eyes_open", "alert_awake", "drowsy_or_sleep"}
+        identified_state_seconds = {
+            key: value for key, value in clean_seconds_by_state.items()
+            if key in identified_state_keys
+        }
+        longest_state_seconds = max(identified_state_seconds.values(), default=0.0)
         state_specific_60s_met = longest_state_seconds >= 60.0 and (
-            target_state != "any" or (bool(state_events) and "unlabelled" not in clean_seconds_by_state)
+            target_state != "any" or bool(state_events)
         )
         flag_counts: dict[str, int] = {}
         for item in epoch_results:
@@ -833,6 +855,11 @@ def find_clean_eeg_segments(
             "available_scalp_channel_count": len(scalp_picks),
             "channels_assessed": len(selected_picks),
             "requested_channel_capacity": channel_limit,
+            "auxiliary_channel_count": len(auxiliary_channels),
+            "auxiliary_channels": auxiliary_channels,
+            "eog_channels_available": eog_channels,
+            "ecg_channels_available": ecg_channels,
+            "emg_channels_available": emg_channels,
             "channel_selection_note": selection_note,
             "epoch_seconds": epoch_seconds,
             "epoch_overlap_seconds": 0,
@@ -857,7 +884,9 @@ def find_clean_eeg_segments(
             "split_half_consistency": split_half,
             "thresholds_note": (
                 "Thresholds are conservative engineering heuristics for prioritising visual review, not clinically validated artefact detectors. "
-                "An epoch with no flags is only a low-artifact candidate; subtle eye, ECG, muscle, sweat, drowsiness and electrode artefacts may remain."
+                "An epoch with no flags is only a low-artifact candidate; subtle eye, ECG, muscle, sweat, drowsiness and electrode artefacts may remain. "
+                f"EOG channels available: {len(eog_channels)}; ECG channels available: {len(ecg_channels)}; EMG channels available: {len(emg_channels)}. "
+                "These auxiliary channels are listed but are not yet used for automatic regression or ICA artefact correction."
             ),
             "clinical_note": (
                 "Do not interpret this screen as proof that an epoch is artefact-free or physiologically normal. "
