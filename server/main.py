@@ -1559,7 +1559,7 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
             signal_review_summary = summ.get("signal_review") or {}
             regular_ratio_analysis = summ.get("spectral_ratio_analysis") or signal_review_summary.get("spectral_ratio_analysis")
             if regular_ratio_analysis:
-                append_spectral_ratio_table("FFT rhythm indices and spectral ratios (all analysed EDF window)", regular_ratio_analysis)
+                append_spectral_ratio_table("Power spectrum report — rhythm indices and spectral ratios (all analysed EDF window)", regular_ratio_analysis)
             clean_ratio_by_state = summ.get("spectral_ratio_analysis_by_state") or {}
             for state_name, ratio_analysis in clean_ratio_by_state.items():
                 if ratio_analysis.get("channels"):
