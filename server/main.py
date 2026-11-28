@@ -501,12 +501,19 @@ def analyse_table(path: Path, ext: str) -> dict[str, Any]:
                             "Frequency-band values are not a clinical diagnosis."]}
 
 
-def analyse_edf(path: Path) -> dict[str, Any]:
+def analyse_edf(path: Path, channel_limit: int = 64) -> dict[str, Any]:
     raw = None
     try:
         import mne
-        from server.eeg_signal_review import build_signal_review, scalp_eeg_channel_indices
+        from server.eeg_signal_review import (
+            SUPPORTED_CHANNEL_LIMITS,
+            apply_channel_limit,
+            build_signal_review,
+            scalp_eeg_channel_indices,
+        )
 
+        if channel_limit not in SUPPORTED_CHANNEL_LIMITS:
+            raise ValueError(f"Channel limit must be one of {SUPPORTED_CHANNEL_LIMITS}.")
         raw = mne.io.read_raw(path, preload=False, verbose="ERROR")
         sf = float(raw.info["sfreq"])
         n = int(raw.n_times)
@@ -528,6 +535,8 @@ def analyse_edf(path: Path) -> dict[str, Any]:
             "sample_count": n,
             "channel_count": len(raw.ch_names),
             "eeg_channel_count": len(names),
+            "available_scalp_channel_count": len(picks),
+            "requested_channel_capacity": channel_limit,
             "auxiliary_channel_count": len(auxiliary_names),
             "channel_names": raw.ch_names,
             "eeg_channels": names,
@@ -544,7 +553,7 @@ def analyse_edf(path: Path) -> dict[str, Any]:
             ],
         }
         if picks and n:
-            selected_picks = picks[:min(32, len(picks))]
+            selected_picks = apply_channel_limit(picks, channel_limit)
             window_seconds = min(120.0, duration)
             stop = min(n, max(1, int(round(sf * window_seconds))))
             data = raw.get_data(picks=selected_picks, start=0, stop=stop, reject_by_annotation=None)
@@ -556,7 +565,13 @@ def analyse_edf(path: Path) -> dict[str, Any]:
                 recording_duration_seconds=duration,
                 window_start_seconds=0.0,
             )
-            summary["analysis_channels_limited_to"] = 32
+            summary["analysis_channels_requested"] = channel_limit
+            summary["analysis_channels_processed"] = len(selected_picks)
+            summary["analysis_channel_limit_note"] = (
+                f"Requested capacity: {channel_limit}; actual scalp EEG channels analysed: {len(selected_picks)}."
+                if len(selected_picks) < channel_limit
+                else f"Processed {len(selected_picks)} scalp EEG channels."
+            )
         else:
             summary["signal_review"] = {
                 "status": "not_available",
@@ -576,7 +591,7 @@ def edf_waveform_preview(
     file_id: str,
     start_seconds: float = 0.0,
     duration_seconds: float = 10.0,
-    max_channels: int = 8,
+    max_channels: int = 24,
     _: None = Depends(require_auth),
 ):
     """Return a compact, downsampled waveform preview from a stored EDF/BDF."""
@@ -587,8 +602,10 @@ def edf_waveform_preview(
     try:
         import mne
         from scipy.signal import resample
-        from server.eeg_signal_review import scalp_eeg_channel_indices
+        from server.eeg_signal_review import SUPPORTED_CHANNEL_LIMITS, scalp_eeg_channel_indices
 
+        if max_channels < 1 or max_channels > 64:
+            raise HTTPException(422, "max_channels must be between 1 and 64.")
         raw = mne.io.read_raw(rec["path"], preload=False, verbose="ERROR")
         sf = float(raw.info["sfreq"])
         total_seconds = float(raw.n_times / sf)
@@ -603,7 +620,7 @@ def edf_waveform_preview(
         start = min(max(0.0, float(start_seconds)), max(0.0, total_seconds - duration))
         stop = min(raw.n_times, max(1, int(round((start + duration) * sf))))
         first = min(raw.n_times - 1, int(round(start * sf)))
-        selected = picks[:max(1, min(12, int(max_channels)))]
+        selected = picks[:max_channels]
         names = [raw.ch_names[i] for i in selected]
         data = raw.get_data(picks=selected, start=first, stop=stop, reject_by_annotation=None) * 1_000_000.0
         target_sfreq = min(64.0, sf)
@@ -617,6 +634,9 @@ def edf_waveform_preview(
             "recording_duration_seconds": round(total_seconds, 3),
             "source_sampling_rate_hz": sf,
             "preview_sampling_rate_hz": target_sfreq,
+            "requested_channel_capacity": max_channels,
+            "available_scalp_channel_count": len(picks),
+            "channels_displayed": len(selected),
             "channels": [
                 {"name": name, "values_uv": np.round(preview[index], 2).tolist()}
                 for index, name in enumerate(names)
@@ -686,7 +706,7 @@ def analyse_pdf(path: Path, run_ocr: bool = True) -> tuple[dict[str, Any], str]:
 
 
 @app.post("/api/files/{file_id}/analyse")
-def analyse_file(file_id: str, ocr: bool = True, _: None = Depends(require_auth)):
+def analyse_file(file_id: str, ocr: bool = True, channel_limit: int = 64, _: None = Depends(require_auth)):
     rec = get_file_record(file_id)
     ext, path = rec["extension"], rec["path"]
     try:
@@ -694,7 +714,13 @@ def analyse_file(file_id: str, ocr: bool = True, _: None = Depends(require_auth)
         if ext in {".csv", ".tsv", ".txt"}:
             summary = analyse_table(path, ext)
         elif ext in {".edf", ".bdf"}:
-            summary = analyse_edf(path)
+            from server.eeg_signal_review import SUPPORTED_CHANNEL_LIMITS
+            if channel_limit not in SUPPORTED_CHANNEL_LIMITS:
+                raise HTTPException(
+                    422,
+                    f"channel_limit must be one of {SUPPORTED_CHANNEL_LIMITS}.",
+                )
+            summary = analyse_edf(path, channel_limit=channel_limit)
         elif ext == ".pdf":
             summary, extracted_text = analyse_pdf(path, run_ocr=ocr)
         elif ext in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -1060,7 +1086,7 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                             styles["BodyText"],
                         ))
                 channel_rows = [["Channel", "RMS (µV)", "Peak-to-peak (µV)", "Dominant Hz", "Quality flags"]]
-                for channel in signal_review.get("channels", [])[:32]:
+                for channel in signal_review.get("channels", [])[:64]:
                     if not channel.get("usable"):
                         channel_rows.append([str(channel.get("channel", "")), "—", "—", "—", str(channel.get("reason", "unavailable"))[:60]])
                         continue
@@ -1101,7 +1127,7 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                     ("Low gamma 30–45 Hz", "low_gamma_30_45_hz"),
                 ]
                 band_rows = [["Channel"] + [item[0] for item in band_definitions]]
-                for channel in signal_review.get("channels", [])[:32]:
+                for channel in signal_review.get("channels", [])[:64]:
                     if not channel.get("usable"):
                         continue
                     relative = channel.get("relative_band_power_pct") or {}

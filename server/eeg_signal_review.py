@@ -19,6 +19,16 @@ BANDS = (
     ("low_gamma_30_45_hz", 30.0, 45.0),
 )
 
+# Supported processing / display capacities. A file may contain fewer actual scalp EEG channels.
+SUPPORTED_CHANNEL_LIMITS = (24, 32, 64)
+
+
+def apply_channel_limit(channel_indices: list[int], channel_limit: int) -> list[int]:
+    """Return up to 24, 32 or 64 selected scalp-channel indices without inventing channels."""
+    if channel_limit not in SUPPORTED_CHANNEL_LIMITS:
+        raise ValueError(f"Channel limit must be one of {SUPPORTED_CHANNEL_LIMITS}.")
+    return list(channel_indices[:channel_limit])
+
 
 SCALP_ELECTRODE_LABELS = {
     "FP1","FP2","FPZ","F7","F5","F3","F1","FZ","F2","F4","F6","F8",
