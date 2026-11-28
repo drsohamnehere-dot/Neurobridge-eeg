@@ -862,7 +862,7 @@ def find_clean_eeg_segments(
             "clinical_note": (
                 "Do not interpret this screen as proof that an epoch is artefact-free or physiologically normal. "
                 "A qualified EEG reviewer must inspect candidate segments in the original recording. "
-                "Potential epileptiform events must not be discarded solely because of amplitude or transient heuristics."
+                "Potential epileptiform events must not be discarded solely because of amplitude or transient heuristics. Drowsiness is not independently classified unless it is identified in recording annotations."
             ),
             "state_consistency_note": (
                 "The 60-second target is only considered met within one identified state when clear state annotations exist or a state filter was selected. "
