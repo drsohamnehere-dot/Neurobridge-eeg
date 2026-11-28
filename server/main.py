@@ -1471,6 +1471,7 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                     f"At least 60 seconds total: {'Yes' if clean_screen.get('minimum_60_seconds_available') else 'No'}",
                     f"At least 60 seconds within one identified state: {'Yes' if clean_screen.get('minimum_60_seconds_in_one_identified_state') else 'Not verified'}",
                     f"Candidate seconds by state: {clean_screen.get('low_artifact_seconds_by_state', {})}",
+                    f"Accepted candidate epochs by state: {clean_screen.get('accepted_low_artifact_epochs_by_state', {})}",
                     f"Skipped BAD/artifact annotation epochs: {clean_screen.get('epochs_skipped_bad_annotations', 0)}",
                     f"Skipped transition epochs: {clean_screen.get('epochs_skipped_state_transition', 0)}",
                 ]
