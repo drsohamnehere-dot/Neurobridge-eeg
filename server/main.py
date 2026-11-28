@@ -603,7 +603,7 @@ def find_clean_eeg_segments(
         raise HTTPException(422, "epoch_seconds must be 2 or 4.")
     if channel_limit not in {24, 32, 64}:
         raise HTTPException(422, "channel_limit must be 24, 32 or 64.")
-    if target_state not in {"any", "eyes_closed", "eyes_open", "alert_awake"}:
+    if target_state not in {"any", "eyes_closed", "eyes_open", "alert_awake", "drowsy_or_sleep"}:
         raise HTTPException(422, "Unsupported target_state.")
 
     rec = get_file_record(file_id)
@@ -648,7 +648,7 @@ def find_clean_eeg_segments(
 
         def state_from_description(description: str) -> str | None:
             text = re.sub(r"[_-]+", " ", description.casefold()).strip()
-            compact = re.sub(r"\\s+", " ", text)
+            compact = re.sub(r"\s+", " ", text)
             words = set(compact.split())
             if "eyes closed" in compact or "close eyes" in compact or "closed eyes" in compact or compact in {"ec", "ec marker"}:
                 return "eyes_closed"
@@ -668,7 +668,7 @@ def find_clean_eeg_segments(
             key=lambda item: item["onset"],
         )
         if target_state != "any" and not any(item["state"] == target_state for item in state_events):
-            label = {"eyes_closed": "eyes-closed", "eyes_open": "eyes-open", "alert_awake": "alert/awake"}[target_state]
+            label = {"eyes_closed": "eyes-closed", "eyes_open": "eyes-open", "alert_awake": "alert/awake", "drowsy_or_sleep": "drowsy/sleep"}[target_state]
             raise HTTPException(
                 422,
                 f"No {label} state markers were recognised in this EDF/BDF file. Use 'All states — verify manually' or add clear event annotations before filtering by state.",
