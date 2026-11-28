@@ -148,3 +148,12 @@ def test_candidate_intervals_merge_adjacent_epochs_only():
         {"start_seconds": 0.0, "end_seconds": 4.0, "duration_seconds": 4.0, "epoch_count": 2},
         {"start_seconds": 8.0, "end_seconds": 10.0, "duration_seconds": 2.0, "epoch_count": 1},
     ]
+
+
+
+def test_fastapi_main_module_has_valid_python_syntax():
+    import py_compile
+    from pathlib import Path
+
+    main_path = Path(__file__).resolve().parents[1] / "server" / "main.py"
+    py_compile.compile(str(main_path), doraise=True)
