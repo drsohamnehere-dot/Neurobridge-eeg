@@ -1362,6 +1362,43 @@ def study_report(study_id: str, _: None = Depends(require_auth)):
                 if k in summ:
                     lines.append(f"<b>{k.replace('_',' ').title()}:</b> {summ[k]}")
             story.append(Paragraph("<br/>".join(lines) or "No summary fields available.", styles["BodyText"]))
+            clean_screen = summ if summ.get("kind") == "clean_segment_screening" else None
+            if clean_screen:
+                from xml.sax.saxutils import escape as xml_escape
+                story.append(Paragraph("Low-artifact segment screening — heuristic review only", styles["Heading4"]))
+                clean_overview = [
+                    f"Epoch length: {clean_screen.get('epoch_seconds', '—')} s; epochs scanned: {clean_screen.get('epochs_scanned', 0)}",
+                    f"Scalp channels assessed: {clean_screen.get('channels_assessed', 0)} of {clean_screen.get('available_scalp_channel_count', 0)} available",
+                    f"Low-artifact candidate epochs: {clean_screen.get('low_artifact_epochs', 0)}; candidate seconds total: {clean_screen.get('low_artifact_seconds_total', 0)}",
+                    f"Longest continuous candidate interval: {clean_screen.get('longest_contiguous_candidate_seconds', 0)} s",
+                    f"At least 60 seconds total: {'Yes' if clean_screen.get('minimum_60_seconds_available') else 'No'}",
+                    f"At least 60 seconds within one identified state: {'Yes' if clean_screen.get('minimum_60_seconds_in_one_identified_state') else 'Not verified'}",
+                    f"Candidate seconds by state: {clean_screen.get('low_artifact_seconds_by_state', {})}",
+                    f"Skipped BAD/artifact annotation epochs: {clean_screen.get('epochs_skipped_bad_annotations', 0)}",
+                    f"Skipped transition epochs: {clean_screen.get('epochs_skipped_state_transition', 0)}",
+                ]
+                story.append(Paragraph("<br/>".join(xml_escape(line) for line in clean_overview), styles["BodyText"]))
+                clean_rows = [["Start (s)", "End (s)", "Duration (s)", "Epochs"]]
+                for interval in clean_screen.get("candidate_intervals", [])[:40]:
+                    clean_rows.append([
+                        str(interval.get("start_seconds", "")),
+                        str(interval.get("end_seconds", "")),
+                        str(interval.get("duration_seconds", "")),
+                        str(interval.get("epoch_count", "")),
+                    ])
+                if len(clean_rows) > 1:
+                    clean_table = Table(clean_rows, repeatRows=1, colWidths=[30*mm, 30*mm, 35*mm, 25*mm])
+                    clean_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dceef1")),
+                        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                        ("PADDING", (0, 0), (-1, -1), 4),
+                        ("FONTSIZE", (0, 0), (-1, -1), 7),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]))
+                    story.append(clean_table)
+                story.append(Paragraph(xml_escape(clean_screen.get("thresholds_note", "")), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(clean_screen.get("clinical_note", "")), styles["BodyText"]))
+                story.append(Paragraph(xml_escape(clean_screen.get("state_consistency_note", "")), styles["BodyText"]))
             signal_review = summ.get("signal_review")
             if signal_review:
                 from xml.sax.saxutils import escape as xml_escape
