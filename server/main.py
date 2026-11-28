@@ -593,6 +593,19 @@ def find_clean_eeg_segments(
     epoch_seconds: int = 2,
     channel_limit: int = 24,
     target_state: str = "any",
+    spectrum_min_hz: float = 0.5,
+    spectrum_max_hz: float = 30.0,
+    delta_low_hz: float = 0.5,
+    delta_high_hz: float = 4.0,
+    theta_low_hz: float = 4.0,
+    theta_high_hz: float = 8.0,
+    alpha_low_hz: float = 8.0,
+    alpha_high_hz: float = 13.0,
+    beta_lf_low_hz: float = 13.0,
+    beta_lf_high_hz: float = 20.0,
+    beta_hf_low_hz: float = 20.0,
+    beta_hf_high_hz: float = 30.0,
+    window_function: str = "none",
     _: None = Depends(require_auth),
 ):
     """Find ranked low-artifact candidate epochs across an EDF/BDF recording.
@@ -617,7 +630,10 @@ def find_clean_eeg_segments(
         from server.eeg_signal_review import (
             assess_eeg_epoch_artifacts,
             apply_channel_limit,
+            aggregate_fft_band_power,
+            calculate_fft_rhythm_indices,
             merge_candidate_epoch_intervals,
+            rhythm_ratio_rows_from_power_sums,
             scalp_eeg_channel_indices,
         )
 
@@ -701,8 +717,32 @@ def find_clean_eeg_segments(
         epochs_per_chunk = max(1, int((30.0 * sfreq) // epoch_samples))
         chunk_samples = epochs_per_chunk * epoch_samples
 
+        spectral_settings = {
+            "spectrum_min_hz": spectrum_min_hz,
+            "spectrum_max_hz": spectrum_max_hz,
+            "delta_low_hz": delta_low_hz,
+            "delta_high_hz": delta_high_hz,
+            "theta_low_hz": theta_low_hz,
+            "theta_high_hz": theta_high_hz,
+            "alpha_low_hz": alpha_low_hz,
+            "alpha_high_hz": alpha_high_hz,
+            "beta_lf_low_hz": beta_lf_low_hz,
+            "beta_lf_high_hz": beta_lf_high_hz,
+            "beta_hf_low_hz": beta_hf_low_hz,
+            "beta_hf_high_hz": beta_hf_high_hz,
+            "window_function": window_function,
+        }
+        # Validate the user-selected frequency configuration before reading the full file.
+        calculate_fft_rhythm_indices(
+            data_volts=np.zeros((1, max(32, epoch_seconds * int(round(sfreq)) + 1))),
+            sfreq=sfreq,
+            channel_names=["validation"],
+            settings=spectral_settings,
+        )
         epoch_results: list[dict[str, Any]] = []
         band_rows: list[tuple[float, dict[str, float]]] = []
+        spectral_power_sums_by_state: dict[str, dict[str, dict[str, float]]] = {}
+        accepted_epoch_counts_by_state: dict[str, int] = {}
         skipped_bad = 0
         skipped_transition = 0
         skipped_state = 0
@@ -775,6 +815,15 @@ def find_clean_eeg_segments(
                 })
                 if assessment["status"] == "low_artifact_candidate":
                     band_rows.append((midpoint, assessment["median_channel_band_power_pct"]))
+                    fft_result = calculate_fft_rhythm_indices(
+                        data_volts=epoch_data,
+                        sfreq=sfreq,
+                        channel_names=[raw.ch_names[i] for i in selected_picks],
+                        settings=spectral_settings,
+                    )
+                    state_bucket = spectral_power_sums_by_state.setdefault(state_name, {})
+                    aggregate_fft_band_power(state_bucket, fft_result)
+                    accepted_epoch_counts_by_state[state_name] = accepted_epoch_counts_by_state.get(state_name, 0) + 1
                 local_start += epoch_samples
 
         if not epoch_results:
@@ -838,6 +887,22 @@ def find_clean_eeg_segments(
                 key=lambda item: (item["channels_with_hard_flags"], item["channels_with_review_flags"], -item["quality_score"], item["start_seconds"]),
             )[:20]
 
+        spectral_ratio_analysis_by_state = {}
+        for state_name, power_sums in spectral_power_sums_by_state.items():
+            spectral_ratio_analysis_by_state[state_name] = {
+                "method": "FFT bin-power sum over accepted low-artifact candidate epochs",
+                "window_function": window_function,
+                "settings": spectral_settings,
+                "accepted_epochs": accepted_epoch_counts_by_state.get(state_name, 0),
+                "channels": rhythm_ratio_rows_from_power_sums(power_sums, spectral_settings),
+                "formulae": {
+                    "alpha_theta": "Alpha index / Theta index",
+                    "theta_beta": "Theta index / (Beta LF index + Beta HF index)",
+                    "theta_beta_lf": "Theta index / Beta LF index",
+                },
+                "note": "Indices are calculated only from low-artifact candidate epochs in this state. This is heuristic segment selection, not proof of artifact-free EEG.",
+            }
+
         state_labeling = (
             "State selected from recognised EDF/BDF event annotations."
             if target_state != "any" else
@@ -863,6 +928,9 @@ def find_clean_eeg_segments(
             "channel_selection_note": selection_note,
             "epoch_seconds": epoch_seconds,
             "epoch_overlap_seconds": 0,
+            "spectral_settings": spectral_settings,
+            "spectral_ratio_analysis_by_state": spectral_ratio_analysis_by_state,
+            "accepted_low_artifact_epochs_by_state": accepted_epoch_counts_by_state,
             "target_state": target_state,
             "state_labeling_note": state_labeling,
             "transition_guard_seconds": 3,
