@@ -767,6 +767,16 @@ def find_clean_eeg_segments(
         low_artifact_epochs = sum(1 for item in epoch_results if item["status"] == "low_artifact_candidate")
         low_artifact_seconds = round(low_artifact_epochs * epoch_seconds, 1)
         longest_run = max((item["duration_seconds"] for item in intervals), default=0.0)
+        clean_seconds_by_state: dict[str, float] = {}
+        for item in epoch_results:
+            if item["status"] == "low_artifact_candidate":
+                state_key = str(item.get("state") or "unlabelled")
+                clean_seconds_by_state[state_key] = clean_seconds_by_state.get(state_key, 0.0) + epoch_seconds
+        clean_seconds_by_state = {key: round(value, 1) for key, value in clean_seconds_by_state.items()}
+        longest_state_seconds = max(clean_seconds_by_state.values(), default=0.0)
+        state_specific_60s_met = longest_state_seconds >= 60.0 and (
+            target_state != "any" or (bool(state_events) and "unlabelled" not in clean_seconds_by_state)
+        )
         flag_counts: dict[str, int] = {}
         for item in epoch_results:
             for channel in item["flagged_channels"]:
@@ -836,6 +846,9 @@ def find_clean_eeg_segments(
             "low_artifact_epochs": low_artifact_epochs,
             "low_artifact_seconds_total": low_artifact_seconds,
             "minimum_60_seconds_available": low_artifact_seconds >= 60.0,
+            "low_artifact_seconds_by_state": clean_seconds_by_state,
+            "minimum_60_seconds_in_one_identified_state": state_specific_60s_met,
+            "longest_candidate_state_seconds": round(longest_state_seconds, 1),
             "longest_contiguous_candidate_seconds": round(longest_run, 3),
             "candidate_intervals": intervals[:100],
             "best_epochs": best_epochs,
@@ -850,6 +863,10 @@ def find_clean_eeg_segments(
                 "Do not interpret this screen as proof that an epoch is artefact-free or physiologically normal. "
                 "A qualified EEG reviewer must inspect candidate segments in the original recording. "
                 "Potential epileptiform events must not be discarded solely because of amplitude or transient heuristics."
+            ),
+            "state_consistency_note": (
+                "The 60-second target is only considered met within one identified state when clear state annotations exist or a state filter was selected. "
+                "When state is unlabelled, or several states are mixed, total candidate seconds must not be treated as a single-state qEEG sample."
             ),
         }
         analysis_id = str(uuid.uuid4())
