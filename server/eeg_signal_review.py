@@ -525,10 +525,11 @@ def calculate_fft_rhythm_indices(
             "status": "ok" if total_power > 0 else "not_available",
             "band_power_index_pct": indices,
             "ratios": ratios,
+            "band_power_raw": {**raw_bands, "total_spectrum": total_power},
             "spectrum_range_hz": [round(effective_min, 3), round(effective_max, 3)],
         }
         rows.append(row)
-        aggregate[channel] = raw_bands if total_power > 0 else {}
+        aggregate[channel] = {**raw_bands, "total_spectrum": total_power} if total_power > 0 else {}
 
     return {
         "method": "FFT bin-power sum; each rhythm index is its band power divided by total power in the configured spectrum range",
@@ -574,7 +575,7 @@ def rhythm_ratio_rows_from_power_sums(
     """Create relative rhythm indices and ratios from accumulated FFT band sums."""
     rows = []
     for channel, powers in power_sums.items():
-        total = sum(value for value in powers.values() if value is not None)
+        total = float(powers.get("total_spectrum") or sum(value for value in powers.values() if value is not None))
         delta = powers.get("delta")
         theta = powers.get("theta")
         alpha = powers.get("alpha")
