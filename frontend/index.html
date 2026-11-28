@@ -17,7 +17,7 @@
     <div class="stat-card"><span>Stored files</span><b id="statFiles">—</b></div><div class="stat-card"><span>Studies</span><b id="statStudies">—</b></div><div class="stat-card"><span>Analyses</span><b id="statAnalyses">—</b></div><div class="stat-card"><span>Server storage used</span><b id="statStorage">—</b></div>
   </section>
   <nav class="steps" aria-label="Workflow">
-    <button class="step active" data-tab="waveforms"><span>1.</span> Waveforms</button><button class="step" data-tab="details"><span>2.</span> Study details</button><button class="step" data-tab="edf"><span>3.</span> EDF Analyzer</button><button class="step" data-tab="review"><span>4.</span> AI & ML review</button><button class="step" data-tab="report"><span>5.</span> Clinical PDF</button>
+    <button class="step active" data-tab="waveforms"><span>1.</span> Waveforms</button><button class="step" data-tab="details"><span>2.</span> Study details</button><button class="step" data-tab="edf"><span>3.</span> EDF Analyzer</button><button class="step" data-tab="review"><span>4.</span> AI & ML review</button><button class="step" data-tab="report"><span>5.</span> Clinical PDF</button><button class="step" data-tab="clean"><span>6.</span> Clean Segment Finder</button>
   </nav>
 
   <section class="panel tab-panel" id="tab-waveforms">
@@ -54,26 +54,6 @@
     <div class="review-card"><div class="card-kicker">RAW EEG RECORDING</div><h3>Upload an EDF/BDF recording</h3><p class="muted small">Choose a recording directly from your iPad, phone or computer. EDF and BDF files are accepted here.</p><input id="edfDirectFileInput" type="file" accept=".edf,.bdf,application/octet-stream" hidden><button type="button" class="primary-btn edf-upload-button edf-choose-button" id="edfChooseFileBtn"><span aria-hidden="true">⇧</span> Choose EDF/BDF recording</button><div id="edfUploadStatus" class="muted small status-line" role="status" aria-live="polite">No recording selected yet. Choose an EDF or BDF file to upload it to NeuroBridge.</div><div class="edf-upload-hint">Maximum file size: 500 MB · Upload requires an active NeuroBridge sign-in.</div><div class="edf-upload-divider"></div><h3>Run signal analysis</h3><p class="muted small">After upload completes, your recording will appear in this list.</p><div class="edf-file-picker-row"><label for="edfAnalysisFile">Select uploaded EDF/BDF recording</label><button type="button" class="secondary-btn" id="refreshEdfFilesBtn">Refresh file list</button></div><select id="edfAnalysisFile"><option value="">No EDF/BDF files uploaded yet</option></select><div id="edfFileListStatus" class="muted small status-line" role="status" aria-live="polite">Checking files stored on the server…</div><div class="edf-channel-config"><label for="edfChannelLimit">EEG channel capacity</label><select id="edfChannelLimit"><option value="24" selected>24 channels</option><option value="32">32 channels</option><option value="64">64 channels</option></select><p class="muted tiny">Choose the maximum number of scalp EEG channels to process and display. NeuroBridge uses only channels actually present and recognised in the EDF/BDF file; it never creates missing channels.</p></div><div class="actions-row"><button class="primary-btn" id="analyseEdfBtn">Run EDF/BDF analysis</button><span class="muted small" id="edfAnalysisStatus">Upload a recording first, then analyse it here.</span></div></div>
     <div class="analysis-output hidden" id="edfAnalysisOutput"><div class="section-row"><h3>EDF/BDF analysis result</h3><span class="pill" id="edfAnalysisType">EEG technical summary</span></div><div id="edfAnalysisMetrics" class="metrics-grid"></div><div id="edfAnalysisText" class="analysis-text"></div></div>
     <div class="review-card" id="edfViewerCard"><div class="card-kicker">RAW SIGNAL VISUALISATION</div><h3>Multichannel EEG waveform preview</h3><p class="muted small">Preview up to 24, 32 or 64 scalp channels. Choose the channel capacity above and a start time to inspect another 10-second segment.</p><div class="pdf-tools"><label class="small" for="edfStartSeconds">Start time (seconds)</label><input id="edfStartSeconds" type="number" min="0" step="1" value="0" style="max-width:130px"><button class="secondary-btn" id="loadEdfWaveform">Load 10-second waveform</button></div><canvas id="edfWaveformCanvas" width="1100" height="520" style="width:100%;height:520px;display:block;background:#071321;border-radius:10px;border:1px solid #244158"></canvas><div id="edfWaveformStatus" class="muted small status-line">Run EDF/BDF analysis to load a waveform preview.</div></div>
-    <div class="review-card" id="edfCleanFinderCard">
-      <div class="card-kicker">AUTOMATED SIGNAL-QUALITY REVIEW</div>
-      <h3>Find low-artifact EEG segments</h3>
-      <p class="muted small">Scan the complete recording in 2- or 4-second epochs. NeuroBridge ranks low-artifact candidates and shows why other epochs need review.</p>
-      <div class="edf-clean-controls">
-        <div><label for="edfCleanEpoch">Epoch length</label><select id="edfCleanEpoch"><option value="2" selected>2 seconds</option><option value="4">4 seconds</option></select></div>
-        <div><label for="edfCleanState">Recording state</label><select id="edfCleanState"><option value="any" selected>All states — verify manually</option><option value="eyes_closed">Eyes closed — annotated only</option><option value="eyes_open">Eyes open — annotated only</option><option value="alert_awake">Alert / awake — annotated only</option><option value="drowsy_or_sleep">Drowsy / sleep — annotated only</option></select></div>
-      </div>
-      <p class="muted tiny">State-specific filtering requires clear EDF event markers. Unlabelled segments are not assumed to be awake, eyes-open or eyes-closed. The first 3 seconds after recognised state markers and any BAD/artifact annotations are skipped.</p>
-      <button type="button" class="primary-btn" id="findCleanSegmentsBtn">Find low-artifact segments</button>
-      <div id="cleanSegmentsStatus" class="status-line small muted" role="status" aria-live="polite">Select a recording and run EEG analysis first, then scan for candidate segments.</div>
-      <div id="cleanSegmentsResults" class="hidden">
-        <div id="cleanSegmentsSummary" class="metrics-grid"></div>
-        <div class="section-row"><h4>Candidate low-artifact intervals</h4><span class="pill" id="cleanSegmentsStateLabel">Research screening</span></div>
-        <div id="cleanSegmentsIntervals" class="clean-interval-list"></div>
-        <h4>Best candidate epochs</h4>
-        <div class="table-scroll"><table class="clean-epochs-table"><thead><tr><th>Time (s)</th><th>State</th><th>Score</th><th>Flags</th><th>Review</th></tr></thead><tbody id="cleanSegmentsRows"><tr><td colspan="5">No scan yet.</td></tr></tbody></table></div>
-        <p class="muted tiny" id="cleanSegmentsDisclaimer"></p>
-      </div>
-    </div>
     <div class="privacy-note warning"><strong>Clinical limitation:</strong> This is a research aid. Generic transient candidates are not spike or seizure detections and cannot diagnose or exclude epilepsy. A qualified EEG reviewer must inspect the complete original recording.</div>
   </section>
 
@@ -96,11 +76,81 @@
     <div class="privacy-note warning"><strong>Important clinical limitation.</strong> This is not an autonomous final clinical interpretation or diagnosis. NeuroBridge currently performs bounded descriptive screening (up to the initial 120 seconds); it does not reliably identify or exclude epileptiform discharges or seizures. A qualified neurologist/neurophysiologist must review the complete original EEG and clinical context.</div>
   </section>
 
+  <section class="panel tab-panel hidden" id="tab-clean">
+    <div class="panel-head">
+      <div><div class="eyebrow">06 / SIGNAL QUALITY & EPOCH SELECTION</div><h2>NeuroBridge Clean Segment Finder</h2>
+      <p class="muted">Scan the full EDF/BDF recording, rank low-artifact candidate epochs, inspect the selected waveform, and calculate spectral indices and ratios from accepted epochs.</p></div>
+      <span class="pill">Research screening only</span>
+    </div>
+    <div class="review-card">
+      <div class="card-kicker">1 · SELECT RECORDING</div>
+      <label for="cleanSegmentFile">EDF/BDF recording stored on NeuroBridge</label>
+      <div class="edf-file-picker-row"><select id="cleanSegmentFile"><option value="">Checking stored EDF/BDF files…</option></select><button type="button" class="secondary-btn" id="refreshCleanFilesBtn">Refresh list</button></div>
+      <div id="cleanSegmentFileStatus" class="muted small status-line" role="status" aria-live="polite">Select the original EDF/BDF recording you want to screen.</div>
+      <div class="edf-clean-controls">
+        <div><label for="cleanSegmentChannelLimit">Maximum scalp EEG channels</label><select id="cleanSegmentChannelLimit"><option value="24" selected>24 channels</option><option value="32">32 channels</option><option value="64">64 channels</option></select></div>
+        <div><label for="edfCleanEpoch">Epoch length</label><select id="edfCleanEpoch"><option value="2" selected>2 seconds</option><option value="4">4 seconds</option></select></div>
+        <div><label for="edfCleanState">Recording state</label><select id="edfCleanState"><option value="any" selected>All states — verify manually</option><option value="eyes_closed">Eyes closed — annotated only</option><option value="eyes_open">Eyes open — annotated only</option><option value="alert_awake">Alert / awake — annotated only</option><option value="drowsy_or_sleep">Drowsy / sleep — annotated only</option></select></div>
+        <div><label for="cleanWindowFunction">FFT window function</label><select id="cleanWindowFunction"><option value="none" selected>None (rectangular)</option><option value="hann">Hann</option></select></div>
+      </div>
+      <details class="clean-spectrum-settings">
+        <summary>Advanced spectral settings — match Neuro-Spectrum</summary>
+        <p class="muted tiny">Enter the same rhythm boundaries and total spectrum range as the Neuro-Spectrum Analysis Style → Rhythms settings. Defaults below are comparison starting values, not confirmed values from your machine.</p>
+        <div class="clean-frequency-grid">
+          <label>Total spectrum min (Hz)<input id="cleanSpectrumMin" type="number" min="0" step="0.1" value="0.5"></label>
+          <label>Total spectrum max (Hz)<input id="cleanSpectrumMax" type="number" min="1" step="0.5" value="30"></label>
+          <label>Delta low (Hz)<input id="cleanDeltaLow" type="number" min="0" step="0.1" value="0.5"></label>
+          <label>Delta high (Hz)<input id="cleanDeltaHigh" type="number" min="0.1" step="0.1" value="4"></label>
+          <label>Theta low (Hz)<input id="cleanThetaLow" type="number" min="0" step="0.1" value="4"></label>
+          <label>Theta high (Hz)<input id="cleanThetaHigh" type="number" min="0.1" step="0.1" value="8"></label>
+          <label>Alpha low (Hz)<input id="cleanAlphaLow" type="number" min="0" step="0.1" value="8"></label>
+          <label>Alpha high (Hz)<input id="cleanAlphaHigh" type="number" min="0.1" step="0.1" value="13"></label>
+          <label>Beta LF low (Hz)<input id="cleanBetaLfLow" type="number" min="0" step="0.1" value="13"></label>
+          <label>Beta LF high / split (Hz)<input id="cleanBetaLfHigh" type="number" min="0.1" step="0.1" value="20"></label>
+          <label>Beta HF low (Hz)<input id="cleanBetaHfLow" type="number" min="0" step="0.1" value="20"></label>
+          <label>Beta HF high (Hz)<input id="cleanBetaHfHigh" type="number" min="0.1" step="0.1" value="30"></label>
+        </div>
+      </details>
+      <p class="muted tiny">The scan skips explicitly marked BAD/artifact intervals and the first 3 seconds after recognised recording-state markers. It does not infer eye state when the EDF has no event annotations.</p>
+      <button type="button" class="primary-btn" id="findCleanSegmentsBtn">Find low-artifact segments across full recording</button>
+      <div id="cleanSegmentsStatus" class="status-line small muted" role="status" aria-live="polite">Choose an EDF/BDF file and run the scan.</div>
+    </div>
+
+    <div class="review-card">
+      <div class="card-kicker">2 · SCAN RESULTS</div>
+      <div id="cleanSegmentsResults" class="hidden">
+        <div id="cleanSegmentsSummary" class="metrics-grid"></div>
+        <div class="section-row"><h3>Candidate low-artifact intervals</h3><span class="pill" id="cleanSegmentsStateLabel">Research screening</span></div>
+        <div id="cleanSegmentsIntervals" class="clean-interval-list"></div>
+        <h3>Best candidate epochs</h3>
+        <div class="table-scroll"><table class="clean-epochs-table"><thead><tr><th>Time (s)</th><th>State</th><th>Score</th><th>Flagged channels / reasons</th><th>Review</th></tr></thead><tbody id="cleanSegmentsRows"><tr><td colspan="5">No scan yet.</td></tr></tbody></table></div>
+        <p class="muted tiny" id="cleanSegmentsDisclaimer"></p>
+      </div>
+    </div>
+
+    <div class="review-card">
+      <div class="card-kicker">3 · CLEAN-SEGMENT SPECTRAL POWER & RATIOS</div>
+      <h3>Neuro-Spectrum-style rhythm indices</h3>
+      <p class="muted small">Calculated from accepted low-artifact candidate epochs, grouped by annotated state. Ratios are shown per derivation.</p>
+      <div id="cleanSegmentsRatioTables"><p class="muted small">Run the clean-segment scan to calculate Beta HF rhythm, Alpha/Theta, Theta/Beta and Theta/Beta LF.</p></div>
+    </div>
+
+    <div class="review-card">
+      <div class="card-kicker">4 · WAVEFORM VERIFICATION</div>
+      <h3>Inspect a candidate in the original EEG</h3>
+      <div class="pdf-tools"><label class="small" for="cleanWaveformStartSeconds">Start time (seconds)</label><input id="cleanWaveformStartSeconds" type="number" min="0" step="1" value="0" style="max-width:130px"><button class="secondary-btn" id="loadCleanWaveformBtn">Load 10-second waveform</button></div>
+      <canvas id="cleanWaveformCanvas" width="1100" height="520" style="width:100%;height:520px;display:block;background:#071321;border-radius:10px;border:1px solid #244158"></canvas>
+      <div id="cleanWaveformStatus" class="muted small status-line">Choose a candidate interval or epoch above and inspect it visually.</div>
+    </div>
+    <div class="privacy-note warning"><strong>Important:</strong> “Low-artifact candidate” does not mean proven artifact-free or physiologically normal. These heuristics do not detect or exclude epileptiform discharges or seizures. A qualified EEG reviewer must inspect the complete original signal, including auxiliary leads and clinical context.</div>
+  </section>
+
+
   <footer><div><strong>NEUROBRIDGE v3.0</strong><span> · Research prototype · Persistent server storage · ML baseline</span></div><p>Experimental research software. Not a validated EEG reader, medical device, diagnostic system, or unrestricted thought decoder.</p></footer>
 </main>
 </div>
 
 <div class="modal-backdrop" id="authModal"><div class="auth-card"><div class="brand-name">🧠 NEUROBRIDGE</div><h2>Private application access</h2><p class="muted">Enter the access code configured on the backend server.</p><label for="accessCode">Access code</label><input type="password" id="accessCode" placeholder="Private access code" autocomplete="current-password"><button class="primary-btn full" id="loginBtn">Open application</button><div class="status-line small" id="loginStatus">The access code is checked by the server.</div><div class="tiny muted">Access code protection is shared access, not individual user accounts.</div></div></div>
 <div class="toast" id="toast"></div>
-<script src="/config.js"></script><script src="/app.js?v=3.3.0" defer></script>
+<script src="/config.js"></script><script src="/app.js?v=3.4.0" defer></script>
 </body></html>

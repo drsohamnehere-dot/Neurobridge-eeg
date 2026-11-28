@@ -18,7 +18,7 @@ function fmtDate(s) { try{return new Date(s).toLocaleString();}catch{return s||'
 function extensionOf(file){const ext=String(file?.extension||'').trim().toLowerCase();if(ext)return ext.startsWith('.')?ext:'.'+ext;const match=String(file?.original_name||'').match(/\.[^.]+$/);return match?match[0].toLowerCase():'';}
 function logout(){token='';sessionStorage.removeItem('nb_token');$('authModal').classList.remove('hidden');$('loginStatus').textContent='Please sign in.';}
 async function login(){const code=$('accessCode').value;if(!code){$('loginStatus').textContent='Enter the access code.';return;} $('loginBtn').disabled=true;$('loginStatus').textContent='Checking access code…';try{const r=await fetch(API+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_code:code})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Login failed');token=d.token;sessionStorage.setItem('nb_token',token);$('authModal').classList.add('hidden');$('accessCode').value='';$('loginStatus').textContent='';await refreshAll();toast('Connected to NeuroBridge backend');}catch(e){$('loginStatus').textContent=e.message;}finally{$('loginBtn').disabled=false;}}
-function showTab(name){document.querySelectorAll('.step').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));document.querySelectorAll('.tab-panel').forEach(x=>x.classList.add('hidden'));$('tab-'+name).classList.remove('hidden');if(name==='edf'&&token){refreshEdfFileSelect().catch(e=>{$('edfFileListStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;});}}
+function showTab(name){document.querySelectorAll('.step').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));document.querySelectorAll('.tab-panel').forEach(x=>x.classList.add('hidden'));$('tab-'+name).classList.remove('hidden');if(name==='edf'&&token){refreshEdfFileSelect().catch(e=>{$('edfFileListStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;});}if(name==='clean'&&token){refreshCleanSegmentFiles().catch(e=>{$('cleanSegmentFileStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;});}}
 document.querySelectorAll('.step').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
 async function checkServer(){try{const r=await fetch(API+'/health');const d=await r.json();$('apiStatus').classList.add('online');$('apiStatus').innerHTML='<i></i> Backend online · v'+d.version;}catch{$('apiStatus').classList.remove('online');$('apiStatus').innerHTML='<i></i> Backend unavailable';}}
 async function refreshStats(){try{const s=await api('/stats');$('statFiles').textContent=s.files;$('statStudies').textContent=s.studies;$('statAnalyses').textContent=s.analyses;$('statStorage').textContent=fmtBytes(s.bytes_stored);}catch(e){console.warn(e);}}
@@ -41,19 +41,27 @@ function renderFiles(){
  body.querySelectorAll('[data-download]').forEach(b=>b.addEventListener('click',()=>downloadFile(b.dataset.download)));
 }
 function fillSelects(){
- const oldAnalysis=$('analysisFile').value,oldPdf=$('pdfFile').value,oldPrediction=$('predictionFile').value,oldEdf=$('edfAnalysisFile')?.value||'';
+ const oldAnalysis=$('analysisFile').value,oldPdf=$('pdfFile').value,oldPrediction=$('predictionFile').value,oldEdf=$('edfAnalysisFile')?.value||'',oldClean=$('cleanSegmentFile')?.value||'';
  const edfFiles=files.filter(f=>['.edf','.bdf'].includes(extensionOf(f)));
  const otherFiles=files.filter(f=>!['.edf','.bdf'].includes(extensionOf(f)));
  const edfListStatus=$('edfFileListStatus');if(edfListStatus)edfListStatus.textContent=edfFiles.length?`${edfFiles.length} EDF/BDF recording${edfFiles.length===1?'':'s'} found on the server.`:'No EDF/BDF recordings found on the server yet. Upload one here or from Waveforms, then tap Refresh file list.';
  $('analysisFile').innerHTML='<option value="">Select a file…</option>'+otherFiles.map(f=>`<option value="${f.id}">${esc(f.original_name)} (${fmtBytes(f.size_bytes)})</option>`).join('');
  $('edfAnalysisFile').innerHTML='<option value="">Select an EDF/BDF recording…</option>'+edfFiles.map(f=>`<option value="${f.id}">${esc(f.original_name)} · ${fmtBytes(f.size_bytes)}</option>`).join('');
+ const cleanSelect=$('cleanSegmentFile');
+ if(cleanSelect)cleanSelect.innerHTML='<option value="">Select an EDF/BDF recording…</option>'+edfFiles.map(f=>`<option value="${f.id}">${esc(f.original_name)} · ${fmtBytes(f.size_bytes)}</option>`).join('');
  $('pdfFile').innerHTML='<option value="">Select PDF…</option>'+files.filter(f=>extensionOf(f)==='.pdf').map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');
  $('predictionFile').innerHTML='<option value="">Select CSV/TSV…</option>'+files.filter(f=>['.csv','.tsv','.txt'].includes(extensionOf(f))).map(f=>`<option value="${f.id}">${esc(f.original_name)}</option>`).join('');
  if(otherFiles.some(f=>f.id===oldAnalysis))$('analysisFile').value=oldAnalysis;
  if(files.some(f=>f.id===oldPdf&&extensionOf(f)==='.pdf'))$('pdfFile').value=oldPdf;
  if(files.some(f=>f.id===oldPrediction&&['.csv','.tsv','.txt'].includes(extensionOf(f))))$('predictionFile').value=oldPrediction;
  if(edfFiles.some(f=>f.id===oldEdf))$('edfAnalysisFile').value=oldEdf;
- else if(edfFiles.length)$('edfAnalysisFile').value=edfFiles[0].id;
+ else if(edfFiles.length&&!oldEdf)$('edfAnalysisFile').value=edfFiles[0].id;
+ if(cleanSelect){
+  if(edfFiles.some(f=>f.id===oldClean))cleanSelect.value=oldClean;
+  else if(edfFiles.length&&!oldClean)cleanSelect.value=edfFiles[0].id;
+  const cleanStatus=$('cleanSegmentFileStatus');
+  if(cleanStatus)cleanStatus.textContent=edfFiles.length?`${edfFiles.length} EDF/BDF recording${edfFiles.length===1?'':'s'} available. Select the recording to scan.`:'No EDF/BDF recordings found. Upload a recording in Waveforms or EDF Analyzer first.';
+ }
 }
 async function renderImageUploads(){const area=$('imageSelectionGrid');const imgs=files.filter(f=>['.png','.jpg','.jpeg','.webp'].includes(extensionOf(f)));if(!imgs.length){area.innerHTML='<div class="empty">Uploaded PNG/JPG/WEBP images will appear here.</div>';return;}area.innerHTML='';for(const f of imgs){const card=document.createElement('div');card.className='image-select-card';const chosen=pageSelections.get(f.id)?.has(0)||false;card.innerHTML=`<img alt="${esc(f.original_name)}" src=""><div class="img-name">${esc(f.original_name)}</div><label><input type="checkbox" ${chosen?'checked':''}> Include in reviewer PDF</label>`;area.appendChild(card);const img=card.querySelector('img');if(imagePreviewCache.has(f.id)){img.src=imagePreviewCache.get(f.id);}else{const resp=await fetch(API+`/files/${f.id}/download`,{headers:authHeaders()});if(resp.ok){const url=URL.createObjectURL(await resp.blob());imagePreviewCache.set(f.id,url);img.src=url;}}const check=card.querySelector('input');check.addEventListener('change',e=>{if(!pageSelections.has(f.id))pageSelections.set(f.id,new Set());const set=pageSelections.get(f.id);if(e.target.checked){if(totalSelectedPages()>=8){e.target.checked=false;toast('Maximum 8 pages/images per study.');return;}set.add(0);}else set.delete(0);updateSelectedPageCount();});}}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -235,8 +243,8 @@ async function loadEdfWaveform(){
  }catch(e){$('edfWaveformStatus').textContent='Waveform preview failed: '+e.message;}
  finally{$('loadEdfWaveform').disabled=false;}
 }
-function drawEdfWaveform(preview){
- const canvas=$('edfWaveformCanvas'),rect=canvas.getBoundingClientRect(),width=Math.max(480,Math.floor(rect.width||900));
+function drawEdfWaveform(preview,canvasId='edfWaveformCanvas'){
+ const canvas=$(canvasId),rect=canvas.getBoundingClientRect(),width=Math.max(480,Math.floor(rect.width||900));
  const channels=preview.channels||[],height=Math.max(260,channels.length*58+36),dpr=Math.max(1,window.devicePixelRatio||1);
  canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);canvas.style.height=height+'px';
  const ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#071321';ctx.fillRect(0,0,width,height);
@@ -270,6 +278,21 @@ async function runEdfAnalysis(){
   await loadEdfWaveform();$('edfAnalysisStatus').textContent=`EDF/BDF analysis saved · ${processed} scalp channels processed (maximum selected: ${channelLimit}).`;await refreshAll();
  }catch(e){$('edfAnalysisStatus').textContent='EDF/BDF analysis failed: '+e.message;}
  finally{button.disabled=false;}
+}
+
+async function refreshCleanSegmentFiles(){files=await api('/files');fillSelects();return files.filter(f=>['.edf','.bdf'].includes(extensionOf(f)));}
+async function loadCleanSegmentWaveform(startSeconds=null){
+ const id=$('cleanSegmentFile').value;
+ if(!id){$('cleanWaveformStatus').textContent='Select an EDF/BDF recording first.';return;}
+ const start=Math.max(0,Number(startSeconds??$('cleanWaveformStartSeconds').value)||0);
+ $('cleanWaveformStatus').textContent='Loading candidate waveform from the original recording…';
+ try{
+  const capacity=Number($('cleanSegmentChannelLimit').value)||24;
+  const preview=await api(`/files/${id}/edf-preview?start_seconds=${encodeURIComponent(start)}&duration_seconds=10&max_channels=${capacity}`);
+  drawEdfWaveform(preview,'cleanWaveformCanvas');
+  $('cleanWaveformStartSeconds').value=String(Math.round(preview.start_seconds));
+  $('cleanWaveformStatus').textContent=`Original recording: ${preview.start_seconds.toFixed(1)}–${(preview.start_seconds+preview.duration_seconds).toFixed(1)} s · ${preview.channels_displayed} of ${preview.available_scalp_channel_count} scalp channels shown · preview resampled to ${preview.preview_sampling_rate_hz} Hz. Visual review is still required.`;
+ }catch(e){$('cleanWaveformStatus').textContent='Candidate waveform preview failed: '+e.message;}
 }
 
 function renderCleanSegmentResults(result){
@@ -310,32 +333,61 @@ function renderCleanSegmentResults(result){
   return `<tr><td>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)}</td><td>${esc(state)}</td><td>${Number(item.quality_score).toFixed(1)}/100</td><td title="${esc(flagText)}">${flags?esc(flagText):'None flagged'}</td><td><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View waveform</button></td></tr>`;
  }).join(''):'<tr><td colspan="5">No candidate epoch available.</td></tr>';
  $('cleanSegmentsDisclaimer').textContent=
-  (s.state_labeling_note||'')+' Clean candidate seconds by state: '+JSON.stringify(s.low_artifact_seconds_by_state||{})+'. '+(s.state_consistency_note||'')+' Auxiliary leads available (not yet used for automated correction): EOG '+JSON.stringify(s.eog_channels_available||[])+', ECG '+JSON.stringify(s.ecg_channels_available||[])+', EMG '+JSON.stringify(s.emg_channels_available||[])+'. '+(s.thresholds_note||'')+' '+(s.clinical_note||'');
+  (s.state_labeling_note||'')+' Clean candidate seconds by state: '+JSON.stringify(s.low_artifact_seconds_by_state||{})+'. '+(s.state_consistency_note||'')+' Auxiliary leads available (not yet used for automated correction): EOG '+JSON.stringify(s.eog_channels_available||[])+', ECG '+JSON.stringify(s.ecg_channels_available||[])+', EMG '+JSON.stringify(s.emg_channels_available||[])+'. '+(s.thresholds_note||'')+' '+(s.clinical_note||''); 
+ const byState=s.spectral_ratio_analysis_by_state||{};
+ const stateNames=Object.keys(byState);
+ $('cleanSegmentsRatioTables').innerHTML=stateNames.length?stateNames.map(stateName=>{
+  const analysis=byState[stateName],rows=analysis.channels||[];
+  const rowHtml=rows.map(item=>{
+   const idx=item.band_power_index_pct||{},rat=item.ratios||{};
+   const fmt=v=>v===null||v===undefined?'—':Number(v).toFixed(3);
+   return `<tr><td>${esc(item.channel)}</td><td>${fmt(idx.delta)}</td><td>${fmt(idx.theta)}</td><td>${fmt(idx.alpha)}</td><td>${fmt(idx.beta_lf)}</td><td>${fmt(idx.beta_hf)}</td><td><strong>${fmt(rat.alpha_theta)}</strong></td><td><strong>${fmt(rat.theta_beta)}</strong></td><td><strong>${fmt(rat.theta_beta_lf)}</strong></td></tr>`;
+  }).join('');
+  return `<h4>${esc(stateName.replaceAll('_',' '))} · ${analysis.accepted_epochs||0} accepted epochs</h4><div class="table-scroll"><table class="clean-ratio-table"><thead><tr><th>Derivation</th><th>Delta %</th><th>Theta %</th><th>Alpha %</th><th>Beta LF rhythm (%)</th><th>Beta HF rhythm (%)</th><th>Alpha/Theta</th><th>Theta/Beta</th><th>Theta/Beta LF</th></tr></thead><tbody>${rowHtml}</tbody></table></div>`;
+ }).join(''):'<p class="muted small">No low-artifact candidate epochs were accepted for spectral-ratio calculation. Review flagged epochs or adjust the epoch/state selection and rerun.</p>';
+ $('cleanSegmentsRatioTables').innerHTML += '<p class="muted tiny">Ratios: Alpha/Theta = alpha index ÷ theta index; Theta/Beta = theta index ÷ (Beta LF + Beta HF); Theta/Beta LF = theta index ÷ Beta LF. Rhythm indices are percentages of FFT power in the configured total spectrum range. These are descriptive research metrics, not diagnostic thresholds.</p>';
+
  $('cleanSegmentsRows').querySelectorAll('[data-clean-start]').forEach(button=>button.addEventListener('click',()=>{
-  $('edfStartSeconds').value=button.dataset.cleanStart;
-  loadEdfWaveform();
+  $('cleanWaveformStartSeconds').value=button.dataset.cleanStart;
+  loadCleanSegmentWaveform(button.dataset.cleanStart);
  }));
  $('cleanSegmentsIntervals').querySelectorAll('[data-clean-start]').forEach(button=>button.addEventListener('click',()=>{
-  $('edfStartSeconds').value=button.dataset.cleanStart;
-  loadEdfWaveform();
+  $('cleanWaveformStartSeconds').value=button.dataset.cleanStart;
+  loadCleanSegmentWaveform(button.dataset.cleanStart);
  }));
 }
 async function runCleanSegmentFinder(){
- const id=$('edfAnalysisFile').value;
+ const id=$('cleanSegmentFile').value;
  if(!id){$('cleanSegmentsStatus').textContent='Select an EDF/BDF recording first.';return;}
  const button=$('findCleanSegmentsBtn');button.disabled=true;
  $('cleanSegmentsResults').classList.add('hidden');
- $('cleanSegmentsStatus').textContent='Scanning the complete recording in short epochs. Long files may take some time…';
+ $('cleanSegmentsRatioTables').innerHTML='<p class="muted small">Calculating ratios from accepted low-artifact candidate epochs…</p>';
+ $('cleanSegmentsStatus').textContent='Scanning the complete recording in short epochs. Long recordings may take time…';
  try{
-  const epoch=Number($('edfCleanEpoch').value)||2;
-  const state=$('edfCleanState').value||'any';
-  const capacity=Number($('edfChannelLimit').value)||24;
-  const result=await api(`/files/${id}/find-clean-segments?epoch_seconds=${epoch}&channel_limit=${capacity}&target_state=${encodeURIComponent(state)}`,{method:'POST'});
+  const q=new URLSearchParams({
+   epoch_seconds:String(Number($('edfCleanEpoch').value)||2),
+   channel_limit:String(Number($('cleanSegmentChannelLimit').value)||24),
+   target_state:$('edfCleanState').value||'any',
+   spectrum_min_hz:String(Number($('cleanSpectrumMin').value)),
+   spectrum_max_hz:String(Number($('cleanSpectrumMax').value)),
+   delta_low_hz:String(Number($('cleanDeltaLow').value)),
+   delta_high_hz:String(Number($('cleanDeltaHigh').value)),
+   theta_low_hz:String(Number($('cleanThetaLow').value)),
+   theta_high_hz:String(Number($('cleanThetaHigh').value)),
+   alpha_low_hz:String(Number($('cleanAlphaLow').value)),
+   alpha_high_hz:String(Number($('cleanAlphaHigh').value)),
+   beta_lf_low_hz:String(Number($('cleanBetaLfLow').value)),
+   beta_lf_high_hz:String(Number($('cleanBetaLfHigh').value)),
+   beta_hf_low_hz:String(Number($('cleanBetaHfLow').value)),
+   beta_hf_high_hz:String(Number($('cleanBetaHfHigh').value)),
+   window_function:$('cleanWindowFunction').value||'none'
+  });
+  const result=await api(`/files/${id}/find-clean-segments?${q.toString()}`,{method:'POST'});
   renderCleanSegmentResults(result);
   const summary=result.summary||{};
-  $('cleanSegmentsStatus').textContent=`Scan complete: ${summary.low_artifact_seconds_total} seconds of low-artifact candidate epochs found from ${summary.epochs_scanned} eligible epochs. These require visual confirmation.`;
+  $('cleanSegmentsStatus').textContent=`Scan complete: ${summary.low_artifact_seconds_total} s of low-artifact candidate epochs found from ${summary.epochs_scanned} eligible epochs. Candidate intervals require visual confirmation.`;
   await refreshAll();
- }catch(e){$('cleanSegmentsStatus').textContent='Segment scan failed: '+e.message;}
+ }catch(e){$('cleanSegmentsStatus').textContent='Segment scan failed: '+e.message;$('cleanSegmentsRatioTables').innerHTML='<p class="muted small">No spectral ratio table was created because the scan failed.</p>';}
  finally{button.disabled=false;}
 }
 
@@ -368,6 +420,8 @@ $('edfChooseFileBtn').addEventListener('click',()=> $('edfDirectFileInput').clic
 $('refreshEdfFilesBtn').addEventListener('click',async()=>{const b=$('refreshEdfFilesBtn');b.disabled=true;try{const count=await refreshEdfFileSelect();toast(count?`${count} EDF/BDF recording(s) found`:'No EDF/BDF recordings found');}catch(e){$('edfFileListStatus').textContent='Could not refresh the EDF/BDF list: '+e.message;toast(e.message);}finally{b.disabled=false;}});
 $('analyseEdfBtn').addEventListener('click',runEdfAnalysis);
 $('findCleanSegmentsBtn').addEventListener('click',runCleanSegmentFinder);
+$('refreshCleanFilesBtn').addEventListener('click',async()=>{const b=$('refreshCleanFilesBtn');b.disabled=true;try{const found=await refreshCleanSegmentFiles();$('cleanSegmentFileStatus').textContent=found.length?`${found.length} EDF/BDF recording(s) found.`:'No EDF/BDF recordings found. Upload one first.';}catch(e){$('cleanSegmentFileStatus').textContent='Could not refresh file list: '+e.message;}finally{b.disabled=false;}});
+$('loadCleanWaveformBtn').addEventListener('click',()=>loadCleanSegmentWaveform());
 $('loadEdfWaveform').addEventListener('click',loadEdfWaveform);
 
 $('loadPdf').addEventListener('click',async()=>{const id=$('pdfFile').value;if(!id){toast('Select a PDF first.');return;}const area=$('pdfPages');area.innerHTML='<div class="muted small">Reading PDF page list…</div>';try{const r=await api(`/files/${id}/pdf-info`);area.innerHTML='';if(!pageSelections.has(id))pageSelections.set(id,new Set());for(const p of r.pages){const card=document.createElement('div');card.className='pdf-page';const checked=pageSelections.get(id).has(p.page);card.innerHTML=`<img alt="PDF page ${p.page}" src=""><label><input type="checkbox" data-pdf-page="${p.page}" ${checked?'checked':''}> Select page ${p.page}</label><span>${p.width} × ${p.height} pt · ${p.has_text?'Embedded text':'Scanned/image page'}</span>`;area.appendChild(card);const img=card.querySelector('img');const resp=await fetch(API+`/files/${id}/pdf-page/${p.page}`,{headers:authHeaders()});if(resp.ok)img.src=URL.createObjectURL(await resp.blob());card.querySelector('input').addEventListener('change',e=>{const set=pageSelections.get(id);if(e.target.checked){if(totalSelectedPages()>=8){e.target.checked=false;toast('Maximum 8 pages per study.');return;}set.add(p.page);}else set.delete(p.page);updateSelectedPageCount();});}if(!r.pages.length)area.innerHTML='<div class="empty">No pages found.</div>';updateSelectedPageCount();}catch(e){area.innerHTML=`<div class="small" style="color:var(--red)">${esc(e.message)}</div>`;}});

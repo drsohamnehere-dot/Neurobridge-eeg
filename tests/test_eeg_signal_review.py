@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from server.eeg_signal_review import apply_channel_limit, assess_eeg_epoch_artifacts, build_signal_review, merge_candidate_epoch_intervals
+from server.eeg_signal_review import apply_channel_limit, assess_eeg_epoch_artifacts, build_signal_review, calculate_fft_rhythm_indices, merge_candidate_epoch_intervals
 
 
 def test_signal_review_returns_bounded_channel_features():
@@ -157,3 +157,53 @@ def test_fastapi_main_module_has_valid_python_syntax():
 
     main_path = Path(__file__).resolve().parents[1] / "server" / "main.py"
     py_compile.compile(str(main_path), doraise=True)
+
+
+
+def test_fft_rhythm_indices_and_neurospectrum_ratios():
+    sfreq = 256.0
+    time = np.arange(int(4 * sfreq)) / sfreq
+    signal = (
+        10e-6 * np.sin(2 * np.pi * 6 * time)
+        + 20e-6 * np.sin(2 * np.pi * 10 * time)
+        + 10e-6 * np.sin(2 * np.pi * 15 * time)
+        + 5e-6 * np.sin(2 * np.pi * 25 * time)
+    )
+    result = calculate_fft_rhythm_indices(
+        data_volts=signal[None, :],
+        sfreq=sfreq,
+        channel_names=["FP1-F7"],
+    )
+    row = result["channels"][0]
+    assert row["status"] == "ok"
+    assert row["band_power_index_pct"]["beta_hf"] > 0
+    assert row["ratios"]["alpha_theta"] == pytest.approx(4.0, rel=0.02)
+    assert row["ratios"]["theta_beta"] == pytest.approx(0.8, rel=0.02)
+    assert row["ratios"]["theta_beta_lf"] == pytest.approx(1.0, rel=0.02)
+
+
+def test_fft_rhythm_ratio_settings_reject_overlapping_bands():
+    sfreq = 256.0
+    time = np.arange(1024) / sfreq
+    data = np.sin(2 * np.pi * 10 * time)[None, :] * 1e-6
+    with pytest.raises(ValueError, match="must not overlap"):
+        calculate_fft_rhythm_indices(
+            data_volts=data,
+            sfreq=sfreq,
+            channel_names=["C3-P3"],
+            settings={"beta_lf_low_hz": 12.0},
+        )
+
+
+def test_build_signal_review_includes_fft_ratio_analysis():
+    sfreq = 256.0
+    time = np.arange(int(4 * sfreq)) / sfreq
+    signal = 20e-6 * np.sin(2 * np.pi * 10 * time) + 10e-6 * np.sin(2 * np.pi * 6 * time)
+    result = build_signal_review(
+        data_volts=signal[None, :],
+        sfreq=sfreq,
+        channel_names=["F3-C3"],
+        recording_duration_seconds=4.0,
+    )
+    ratio = result["spectral_ratio_analysis"]["channels"][0]["ratios"]["alpha_theta"]
+    assert ratio == pytest.approx(4.0, rel=0.02)

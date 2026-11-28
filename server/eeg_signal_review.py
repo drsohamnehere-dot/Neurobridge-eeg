@@ -195,8 +195,18 @@ def build_signal_review(
         for item in channel_results if item.get("quality_flags")
     ]
     usable_count = sum(1 for item in channel_results if item.get("usable"))
+    spectral_ratio_analysis = calculate_fft_rhythm_indices(
+        data_volts=data,
+        sfreq=float(sfreq),
+        channel_names=channel_names,
+    )
+    # Keep persisted review summaries compact; raw FFT bin-power sums are only
+    # needed internally when combining accepted clean epochs.
+    for ratio_row in spectral_ratio_analysis.get("channels", []):
+        ratio_row.pop("band_power_raw", None)
     return {
         "status": "research_screening_only",
+        "spectral_ratio_analysis": spectral_ratio_analysis,
         "method": "Descriptive amplitude, spectral-band, signal-quality and generic transient-candidate screening",
         "recording_duration_seconds": round(float(recording_duration_seconds), 2),
         "analysis_window_start_seconds": round(float(window_start_seconds), 2),
@@ -392,3 +402,208 @@ def merge_candidate_epoch_intervals(epochs: list[dict[str, Any]]) -> list[dict[s
                 "epoch_count": 1,
             })
     return merged
+
+
+DEFAULT_SPECTRAL_RATIO_SETTINGS = {
+    "spectrum_min_hz": 0.5,
+    "spectrum_max_hz": 30.0,
+    "delta_low_hz": 0.5,
+    "delta_high_hz": 4.0,
+    "theta_low_hz": 4.0,
+    "theta_high_hz": 8.0,
+    "alpha_low_hz": 8.0,
+    "alpha_high_hz": 13.0,
+    "beta_lf_low_hz": 13.0,
+    "beta_lf_high_hz": 20.0,
+    "beta_hf_low_hz": 20.0,
+    "beta_hf_high_hz": 30.0,
+    "window_function": "none",
+}
+
+
+def calculate_fft_rhythm_indices(
+    data_volts: np.ndarray,
+    sfreq: float,
+    channel_names: list[str],
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Calculate FFT-bin rhythm indices and Neuro-Spectrum-style ratios.
+
+    Indices are each band's summed FFT power divided by total FFT power within
+    the configured spectrum range. Ratios are computed from the band indices.
+    This is a comparison-oriented calculation, not a clinical EEG classifier.
+    """
+    config = {**DEFAULT_SPECTRAL_RATIO_SETTINGS, **(settings or {})}
+    required = [
+        "spectrum_min_hz", "spectrum_max_hz",
+        "delta_low_hz", "delta_high_hz",
+        "theta_low_hz", "theta_high_hz",
+        "alpha_low_hz", "alpha_high_hz",
+        "beta_lf_low_hz", "beta_lf_high_hz",
+        "beta_hf_low_hz", "beta_hf_high_hz",
+    ]
+    try:
+        bounds = {key: float(config[key]) for key in required}
+    except (TypeError, ValueError, KeyError) as exc:
+        raise ValueError("Spectral ratio settings must contain valid numeric frequency boundaries.") from exc
+    if not all(np.isfinite(value) for value in bounds.values()):
+        raise ValueError("Spectral ratio boundaries must be finite numbers.")
+    if bounds["spectrum_min_hz"] < 0 or bounds["spectrum_max_hz"] <= bounds["spectrum_min_hz"]:
+        raise ValueError("Total spectrum range must have a positive lower-to-upper frequency range.")
+
+    ordered = [
+        ("delta", bounds["delta_low_hz"], bounds["delta_high_hz"]),
+        ("theta", bounds["theta_low_hz"], bounds["theta_high_hz"]),
+        ("alpha", bounds["alpha_low_hz"], bounds["alpha_high_hz"]),
+        ("beta_lf", bounds["beta_lf_low_hz"], bounds["beta_lf_high_hz"]),
+        ("beta_hf", bounds["beta_hf_low_hz"], bounds["beta_hf_high_hz"]),
+    ]
+    previous_high = bounds["spectrum_min_hz"]
+    for name, low, high in ordered:
+        if low < bounds["spectrum_min_hz"] or high > bounds["spectrum_max_hz"] or high <= low:
+            raise ValueError(f"{name} band must lie within the total spectrum range and have positive width.")
+        if low < previous_high - 1e-9:
+            raise ValueError("Rhythm bands must be ordered and must not overlap.")
+        previous_high = high
+    if previous_high > bounds["spectrum_max_hz"] + 1e-9:
+        raise ValueError("Rhythm bands exceed the total spectrum range.")
+
+    window_name = str(config.get("window_function", "none")).lower()
+    if window_name not in {"none", "hann"}:
+        raise ValueError("Window function must be 'none' or 'hann'.")
+
+    data = np.asarray(data_volts, dtype=np.float64)
+    if data.ndim != 2 or data.shape[0] == 0:
+        raise ValueError("EEG data must be a non-empty channels-by-samples array.")
+    if not np.isfinite(sfreq) or sfreq <= 0:
+        raise ValueError("Sampling frequency must be positive and finite.")
+    nyquist = float(sfreq) / 2.0
+    effective_max = min(bounds["spectrum_max_hz"], nyquist)
+    effective_min = bounds["spectrum_min_hz"]
+    if effective_max <= effective_min:
+        raise ValueError("The recording Nyquist frequency is below the requested total spectrum minimum.")
+
+    rows: list[dict[str, Any]] = []
+    aggregate: dict[str, dict[str, float]] = {}
+    band_names = [name for name, _, _ in ordered]
+    for index in range(min(data.shape[0], len(channel_names))):
+        channel = str(channel_names[index])
+        x = data[index]
+        x = x[np.isfinite(x)]
+        if x.size < max(32, int(round(sfreq * 1.5))):
+            rows.append({
+                "channel": channel, "status": "not_available",
+                "reason": "Too few finite samples for FFT rhythm indices.",
+            })
+            continue
+
+        centered = x - float(np.mean(x))
+        window = np.ones(centered.size, dtype=np.float64) if window_name == "none" else np.hanning(centered.size)
+        power = np.square(np.abs(np.fft.rfft(centered * window)))
+        frequencies = np.fft.rfftfreq(centered.size, d=1.0 / float(sfreq))
+
+        total_mask = (frequencies >= effective_min) & (frequencies <= effective_max)
+        total_power = float(np.sum(power[total_mask]))
+        raw_bands: dict[str, float | None] = {}
+        indices: dict[str, float | None] = {}
+        for name, low, high in ordered:
+            actual_low = max(low, effective_min)
+            actual_high = min(high, effective_max)
+            # Do not report a partial rhythm band when Nyquist truncates its configured upper edge.
+            if actual_high <= actual_low or high > nyquist + 1e-9:
+                raw_bands[name] = None
+                indices[name] = None
+                continue
+            mask = (frequencies >= actual_low) & (frequencies < actual_high)
+            band_power = float(np.sum(power[mask])) if np.any(mask) else 0.0
+            raw_bands[name] = band_power
+            indices[name] = round(100.0 * band_power / total_power, 4) if total_power > 0 else None
+
+        beta_total = None
+        if raw_bands.get("beta_lf") is not None and raw_bands.get("beta_hf") is not None and total_power > 0:
+            beta_total = raw_bands["beta_lf"] + raw_bands["beta_hf"]
+
+        theta_power = raw_bands.get("theta")
+        alpha_power = raw_bands.get("alpha")
+        beta_lf_power = raw_bands.get("beta_lf")
+        ratios = {
+            "alpha_theta": round(alpha_power / theta_power, 4) if alpha_power is not None and theta_power is not None and theta_power > 0 else None,
+            "theta_beta": round(theta_power / beta_total, 4) if theta_power is not None and beta_total is not None and beta_total > 0 else None,
+            "theta_beta_lf": round(theta_power / beta_lf_power, 4) if theta_power is not None and beta_lf_power is not None and beta_lf_power > 0 else None,
+        }
+        row = {
+            "channel": channel,
+            "status": "ok" if total_power > 0 else "not_available",
+            "band_power_index_pct": indices,
+            "ratios": ratios,
+            "band_power_raw": {**raw_bands, "total_spectrum": total_power},
+            "spectrum_range_hz": [round(effective_min, 3), round(effective_max, 3)],
+        }
+        rows.append(row)
+        aggregate[channel] = {**raw_bands, "total_spectrum": total_power} if total_power > 0 else {}
+
+    return {
+        "method": "FFT bin-power sum; each rhythm index is its band power divided by total power in the configured spectrum range",
+        "window_function": window_name,
+        "settings": {key: config[key] for key in DEFAULT_SPECTRAL_RATIO_SETTINGS},
+        "effective_spectrum_range_hz": [round(effective_min, 3), round(effective_max, 3)],
+        "nyquist_hz": round(nyquist, 3),
+        "channels": rows,
+        "formulae": {
+            "alpha_theta": "Alpha index / Theta index",
+            "theta_beta": "Theta index / (Beta LF index + Beta HF index)",
+            "theta_beta_lf": "Theta index / Beta LF index",
+        },
+        "note": (
+            "Comparison-oriented FFT indices. Neuro-Spectrum also allows customised rhythm boundaries and window settings; "
+            "set the same boundaries, total frequency range, selected segment and window in both systems before comparing. "
+            "These ratios are descriptive qEEG features, not stand-alone diagnoses."
+        ),
+    }
+
+
+def aggregate_fft_band_power(
+    target: dict[str, dict[str, float]],
+    fft_result: dict[str, Any],
+) -> None:
+    """Add absolute per-channel band power sums from one same-length FFT epoch."""
+    for row in fft_result.get("channels", []):
+        if row.get("status") != "ok":
+            continue
+        bands = row.get("_band_power_raw") or row.get("band_power_raw")
+        if not bands:
+            continue
+        current = target.setdefault(row["channel"], {})
+        for name, value in bands.items():
+            if value is not None:
+                current[name] = current.get(name, 0.0) + float(value)
+
+
+def rhythm_ratio_rows_from_power_sums(
+    power_sums: dict[str, dict[str, float]],
+    settings: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Create relative rhythm indices and ratios from accumulated FFT band sums."""
+    rows = []
+    for channel, powers in power_sums.items():
+        total = float(powers.get("total_spectrum") or sum(value for value in powers.values() if value is not None))
+        delta = powers.get("delta")
+        theta = powers.get("theta")
+        alpha = powers.get("alpha")
+        beta_lf = powers.get("beta_lf")
+        beta_hf = powers.get("beta_hf")
+        beta_total = (beta_lf + beta_hf) if beta_lf is not None and beta_hf is not None else None
+        idx = {
+            name: (round(100.0 * value / total, 4) if value is not None and total > 0 else None)
+            for name, value in powers.items()
+        }
+        rows.append({
+            "channel": channel,
+            "band_power_index_pct": idx,
+            "ratios": {
+                "alpha_theta": round(alpha / theta, 4) if alpha is not None and theta is not None and theta > 0 else None,
+                "theta_beta": round(theta / beta_total, 4) if theta is not None and beta_total is not None and beta_total > 0 else None,
+                "theta_beta_lf": round(theta / beta_lf, 4) if theta is not None and beta_lf is not None and beta_lf > 0 else None,
+            },
+        })
+    return rows

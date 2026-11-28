@@ -50,3 +50,21 @@
 .clean-epochs-table th,.clean-epochs-table td{padding:8px;border-bottom:1px solid var(--line,#294054);text-align:left;white-space:nowrap}
 .clean-epochs-table th{color:#8faabd}
 @media(max-width:600px){.edf-clean-controls{grid-template-columns:1fr}.clean-interval{grid-template-columns:1fr auto}.clean-interval span{grid-column:1}}
+
+
+/* Page 6: low-artifact finder and Neuro-Spectrum-compatible ratio tables */
+.clean-spectrum-settings{margin:14px 0;padding:12px 14px;border:1px solid var(--line,#294054);border-radius:10px;background:#0a1b2b}
+.clean-spectrum-settings summary{cursor:pointer;font-size:13px;font-weight:800;color:#d7e6ef}
+.clean-frequency-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:12px}
+.clean-frequency-grid label{display:flex;flex-direction:column;gap:5px;font-size:11px;color:#adc1d0;font-weight:700}
+.clean-frequency-grid input{width:100%;min-width:0}
+.clean-ratio-table{width:100%;min-width:900px;border-collapse:collapse;font-size:11px}
+.clean-ratio-table th,.clean-ratio-table td{padding:8px 7px;border-bottom:1px solid var(--line,#294054);text-align:right;white-space:nowrap}
+.clean-ratio-table th:first-child,.clean-ratio-table td:first-child{text-align:left;position:sticky;left:0;background:#0a1b2b}
+.clean-ratio-table th{color:#8faabd;background:#0c2032}
+.clean-ratio-table strong{color:#6bdbe0}
+#cleanSegmentsRatioTables{overflow:hidden}
+#cleanSegmentsRatioTables .table-scroll{margin-bottom:14px}
+#tab-clean .review-card{margin-bottom:14px}
+@media(max-width:650px){.clean-frequency-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:400px){.clean-frequency-grid{grid-template-columns:1fr}}
