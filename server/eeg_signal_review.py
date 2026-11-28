@@ -195,8 +195,14 @@ def build_signal_review(
         for item in channel_results if item.get("quality_flags")
     ]
     usable_count = sum(1 for item in channel_results if item.get("usable"))
+    spectral_ratio_analysis = calculate_fft_rhythm_indices(
+        data_volts=data,
+        sfreq=float(sfreq),
+        channel_names=channel_names,
+    )
     return {
         "status": "research_screening_only",
+        "spectral_ratio_analysis": spectral_ratio_analysis,
         "method": "Descriptive amplitude, spectral-band, signal-quality and generic transient-candidate screening",
         "recording_duration_seconds": round(float(recording_duration_seconds), 2),
         "analysis_window_start_seconds": round(float(window_start_seconds), 2),
