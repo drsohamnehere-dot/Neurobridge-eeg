@@ -38,3 +38,15 @@
 .edf-channel-config select{width:100%}
 .edf-channel-config p{grid-column:1/-1;margin:0;line-height:1.5}
 @media(max-width:520px){.edf-channel-config{grid-template-columns:1fr}}
+
+
+.edf-clean-controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+.edf-clean-controls label{display:block;margin-bottom:6px;font-size:12px;font-weight:800;color:#d6e6ef}
+.edf-clean-controls select{width:100%}
+.clean-interval-list{display:grid;gap:7px;margin:10px 0 18px}
+.clean-interval{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:9px 11px;border:1px solid var(--line,#294054);border-radius:9px;background:#0a1b2b;font-size:12px}
+.clean-interval span{color:var(--muted,#9bb0c1)}
+.clean-epochs-table{width:100%;border-collapse:collapse;font-size:12px}
+.clean-epochs-table th,.clean-epochs-table td{padding:8px;border-bottom:1px solid var(--line,#294054);text-align:left;white-space:nowrap}
+.clean-epochs-table th{color:#8faabd}
+@media(max-width:600px){.edf-clean-controls{grid-template-columns:1fr}.clean-interval{grid-template-columns:1fr auto}.clean-interval span{grid-column:1}}
