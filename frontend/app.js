@@ -283,6 +283,7 @@ function renderCleanSegmentResults(result){
   ['60-second total target',s.minimum_60_seconds_available?'Reached':'Not reached'],
   ['60 seconds in one identified state',s.minimum_60_seconds_in_one_identified_state?'Reached':'Not verified'],
   ['Channels assessed',s.channels_assessed??0],
+  ['EOG / ECG / EMG leads',`${(s.eog_channels_available||[]).length} / ${(s.ecg_channels_available||[]).length} / ${(s.emg_channels_available||[]).length}`],
  ];
  $('cleanSegmentsSummary').innerHTML=metrics.map(([k,v])=>`<div class="metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
  $('cleanSegmentsStateLabel').textContent=(s.target_state||'any').replaceAll('_',' ');
@@ -293,13 +294,23 @@ function renderCleanSegmentResults(result){
  const epochs=s.best_epochs||[];
  $('cleanSegmentsRows').innerHTML=epochs.length?epochs.map(item=>{
   const flagged=(item.flagged_channels||[]);
+  const flagNames={
+   possible_flat_or_disconnected_channel:'flat/disconnected',
+   possible_non_finite_samples:'invalid samples',
+   possible_large_amplitude_artifact:'large amplitude',
+   possible_abrupt_step_or_electrode_pop:'abrupt step/pop',
+   possible_high_frequency_muscle_emg:'possible muscle/EMG',
+   possible_50_hz_line_noise:'50 Hz line noise',
+   possible_sweat_or_baseline_drift:'baseline drift',
+   possible_frontal_eye_movement_or_slow_activity:'frontal slow/eye candidate'
+  };
   const flags=flagged.reduce((sum,entry)=>sum+(entry.flags||[]).length,0);
-  const flagText=flagged.map(entry=>entry.channel+': '+entry.flags.join(', ')).join('; ');
+  const flagText=flagged.map(entry=>entry.channel+': '+entry.flags.map(flag=>flagNames[flag]||flag).join(', ')).join('; ');
   const state=(item.state||'unlabelled').replaceAll('_',' ');
-  return `<tr><td>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)}</td><td>${esc(state)}</td><td>${Number(item.quality_score).toFixed(1)}/100</td><td title="${esc(flagText)}">${flags?esc(flagged.map(entry=>entry.channel).join(', ')):'None flagged'}</td><td><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View waveform</button></td></tr>`;
+  return `<tr><td>${Number(item.start_seconds).toFixed(1)}–${Number(item.end_seconds).toFixed(1)}</td><td>${esc(state)}</td><td>${Number(item.quality_score).toFixed(1)}/100</td><td title="${esc(flagText)}">${flags?esc(flagText):'None flagged'}</td><td><button type="button" class="tiny-btn" data-clean-start="${item.start_seconds}">View waveform</button></td></tr>`;
  }).join(''):'<tr><td colspan="5">No candidate epoch available.</td></tr>';
  $('cleanSegmentsDisclaimer').textContent=
-  (s.state_labeling_note||'')+' Clean candidate seconds by state: '+JSON.stringify(s.low_artifact_seconds_by_state||{})+'. '+(s.state_consistency_note||'')+' '+(s.thresholds_note||'')+' '+(s.clinical_note||'');
+  (s.state_labeling_note||'')+' Clean candidate seconds by state: '+JSON.stringify(s.low_artifact_seconds_by_state||{})+'. '+(s.state_consistency_note||'')+' Auxiliary leads available (not yet used for automated correction): EOG '+JSON.stringify(s.eog_channels_available||[])+', ECG '+JSON.stringify(s.ecg_channels_available||[])+', EMG '+JSON.stringify(s.emg_channels_available||[])+'. '+(s.thresholds_note||'')+' '+(s.clinical_note||'');
  $('cleanSegmentsRows').querySelectorAll('[data-clean-start]').forEach(button=>button.addEventListener('click',()=>{
   $('edfStartSeconds').value=button.dataset.cleanStart;
   loadEdfWaveform();
