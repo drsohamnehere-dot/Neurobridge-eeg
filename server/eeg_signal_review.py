@@ -200,6 +200,10 @@ def build_signal_review(
         sfreq=float(sfreq),
         channel_names=channel_names,
     )
+    # Keep persisted review summaries compact; raw FFT bin-power sums are only
+    # needed internally when combining accepted clean epochs.
+    for ratio_row in spectral_ratio_analysis.get("channels", []):
+        ratio_row.pop("band_power_raw", None)
     return {
         "status": "research_screening_only",
         "spectral_ratio_analysis": spectral_ratio_analysis,
@@ -505,7 +509,8 @@ def calculate_fft_rhythm_indices(
         for name, low, high in ordered:
             actual_low = max(low, effective_min)
             actual_high = min(high, effective_max)
-            if actual_high <= actual_low or (name == "beta_hf" and actual_high <= 20.0 and effective_max <= 20.0):
+            # Do not report a partial rhythm band when Nyquist truncates its configured upper edge.
+            if actual_high <= actual_low or high > nyquist + 1e-9:
                 raw_bands[name] = None
                 indices[name] = None
                 continue
